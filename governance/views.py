@@ -1,5 +1,7 @@
 from django.shortcuts import render
-
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 # Create your views here.
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,7 +10,7 @@ from rest_framework import status
 from .models import AuditEvent
 from .serializers import AuditEventSerializer
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class AuditEventListCreateAPIView(APIView):
     """
     GET  : Get all audit events
@@ -31,7 +33,8 @@ class AuditEventListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=AuditEventSerializer)
     def post(self, request):
         serializer = AuditEventSerializer(data=request.data)
 
@@ -56,7 +59,7 @@ class AuditEventListCreateAPIView(APIView):
         )
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class AuditEventRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve audit event by ID
@@ -92,7 +95,8 @@ class AuditEventRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=AuditEventSerializer)
     def put(self, request, pk):
         audit_event = self.get_object(pk)
 

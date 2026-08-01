@@ -1,11 +1,17 @@
+import json
+
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User as AuthUser
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIRequestFactory
 
 from accounts.models import ConsentRecord, RegistrationApplication, UserTbl, roles
+from accounts.views import RegisterAPIView
 from catalog.models import ReferenceValue, ScopeCatalog
+from evidence.models import EvidenceDocument
 from professionals.models import ProfessionalProfile
 from tenancy.models import Tenant
 
@@ -158,3 +164,106 @@ class LoginAPIViewTests(TestCase):
         self.assertTrue(consent_records.filter(consent_type="TERMS", is_granted=True).exists())
         self.assertTrue(consent_records.filter(consent_type="PRIVACY", is_granted=True).exists())
         self.assertTrue(consent_records.filter(consent_type="MARKETING", is_granted=False).exists())
+
+    def test_register_saves_resume_to_evidence_document(self):
+        industry = ReferenceValue.objects.create(
+            option_set="INDUSTRY",
+            code="MARINE",
+            label="Marine",
+            created_by=self.platform_user,
+        )
+        scope = ScopeCatalog.objects.create(
+            code="OG-LPM",
+            industry=industry,
+            scope_name="Line Pipe Marine",
+            created_by=self.platform_user,
+        )
+
+        payload = {
+            "tenant_id": str(self.tenant.public_id),
+            "account": json.dumps({
+                "email": "resumeuser@example.com",
+                "mobile_country_code": "+61",
+                "mobile_number": "412345678",
+                "password": "ResumePassword123!",
+                "two_factor_preference": "EMAIL",
+            }),
+            "profile": json.dumps({
+                "first_name": "Resume",
+                "last_name": "User",
+                "existing_resume": True,
+                "primary_industry": str(industry.pk),
+                "primary_scope": str(scope.pk),
+            }),
+            "consent": json.dumps({
+                "terms": True,
+                "privacy": True,
+                "resume_processing": True,
+                "marketing": False,
+            }),
+            "resume": SimpleUploadedFile("resume.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        }
+
+        factory = APIRequestFactory()
+        request = factory.post("/register/", data=payload, format="multipart")
+        response = RegisterAPIView.as_view()(request)
+
+        self.assertEqual(response.status_code, 201, response.data if hasattr(response, "data") else response.content)
+        user = UserTbl.objects.get(email="resumeuser@example.com")
+        profile = ProfessionalProfile.objects.get(user=user)
+        evidence_document = EvidenceDocument.objects.filter(professional=profile).first()
+        self.assertIsNotNone(evidence_document)
+        self.assertEqual(evidence_document.original_file_name, "resume.pdf")
+        self.assertTrue(evidence_document.file.name)
+
+    def test_register_saves_profile_photo_to_professional_profile(self):
+        industry = ReferenceValue.objects.create(
+            option_set="INDUSTRY",
+            code="MARINE",
+            label="Marine",
+            created_by=self.platform_user,
+        )
+        scope = ScopeCatalog.objects.create(
+            code="OG-LPM",
+            industry=industry,
+            scope_name="Line Pipe Marine",
+            created_by=self.platform_user,
+        )
+
+        payload = {
+            "tenant_id": str(self.tenant.public_id),
+            "account": json.dumps({
+                "email": "photouser@example.com",
+                "mobile_country_code": "+61",
+                "mobile_number": "412345678",
+                "password": "PhotoPassword123!",
+                "two_factor_preference": "EMAIL",
+            }),
+            "profile": json.dumps({
+                "first_name": "Photo",
+                "last_name": "User",
+                "existing_resume": False,
+                "primary_industry": str(industry.pk),
+                "primary_scope": str(scope.pk),
+            }),
+            "consent": json.dumps({
+                "terms": True,
+                "privacy": True,
+                "resume_processing": False,
+                "marketing": False,
+            }),
+            "profile_photo": SimpleUploadedFile("photo.jpg", b"JPEGIMAGE", content_type="image/jpeg"),
+        }
+
+        factory = APIRequestFactory()
+        request = factory.post("/register/", data=payload, format="multipart")
+        response = RegisterAPIView.as_view()(request)
+
+        self.assertEqual(response.status_code, 201, response.data if hasattr(response, "data") else response.content)
+        user = UserTbl.objects.get(email="photouser@example.com")
+        profile = ProfessionalProfile.objects.get(user=user)
+        self.assertIsNotNone(profile.profile_photo_evidence)
+        self.assertEqual(profile.profile_photo_evidence.original_file_name, "photo.jpg")
+        self.assertTrue(profile.profile_photo_evidence.file.name)
+        self.assertEqual(profile.profile_photo_evidence.evidence_type.code, "PHOTOGRAPH")
+

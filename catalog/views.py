@@ -1,3 +1,6 @@
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -12,7 +15,7 @@ from .serializers import (
     ScopeModuleSerializer,
 )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ReferenceValueListCreateAPIView(APIView):
     """
     GET  : Get all reference values
@@ -36,6 +39,7 @@ class ReferenceValueListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(request=ReferenceValueSerializer)
     def post(self, request):
         serializer = ReferenceValueSerializer(data=request.data)
 
@@ -59,7 +63,7 @@ class ReferenceValueListCreateAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ReferenceValueRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get reference value by ID
@@ -96,7 +100,8 @@ class ReferenceValueRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ReferenceValueSerializer)
     def put(self, request, pk):
         reference_value = self.get_object(pk)
 
@@ -155,7 +160,7 @@ class ReferenceValueRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeCatalogListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -166,7 +171,8 @@ class ScopeCatalogListCreateAPIView(APIView):
             {"success": True, "message": "Scope catalogs fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ScopeCatalogSerializer)
     def post(self, request):
         serializer = ScopeCatalogSerializer(data=request.data)
         if serializer.is_valid():
@@ -177,7 +183,7 @@ class ScopeCatalogListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeCatalogRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -193,7 +199,8 @@ class ScopeCatalogRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Scope catalog not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = ScopeCatalogSerializer(scope_catalog)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=ScopeCatalogSerializer)
     def put(self, request, pk):
         scope_catalog = self.get_object(pk)
         if not scope_catalog:
@@ -211,7 +218,7 @@ class ScopeCatalogRetrieveUpdateDeleteAPIView(APIView):
         scope_catalog.delete()
         return Response({"success": True, "message": "Scope catalog deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class FormModuleListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -222,7 +229,8 @@ class FormModuleListCreateAPIView(APIView):
             {"success": True, "message": "Form modules fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=FormModuleSerializer)
     def post(self, request):
         serializer = FormModuleSerializer(data=request.data)
         if serializer.is_valid():
@@ -233,7 +241,7 @@ class FormModuleListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class FormModuleRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -249,7 +257,8 @@ class FormModuleRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Form module not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = FormModuleSerializer(form_module)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=FormModuleSerializer)
     def put(self, request, pk):
         form_module = self.get_object(pk)
         if not form_module:
@@ -267,7 +276,7 @@ class FormModuleRetrieveUpdateDeleteAPIView(APIView):
         form_module.delete()
         return Response({"success": True, "message": "Form module deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeModuleListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -278,7 +287,8 @@ class ScopeModuleListCreateAPIView(APIView):
             {"success": True, "message": "Scope modules fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ScopeModuleSerializer)
     def post(self, request):
         serializer = ScopeModuleSerializer(data=request.data)
         if serializer.is_valid():
@@ -289,7 +299,7 @@ class ScopeModuleListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeModuleRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -305,7 +315,8 @@ class ScopeModuleRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Scope module not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = ScopeModuleSerializer(scope_module)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=ScopeModuleSerializer)
     def put(self, request, pk):
         scope_module = self.get_object(pk)
         if not scope_module:
@@ -323,7 +334,7 @@ class ScopeModuleRetrieveUpdateDeleteAPIView(APIView):
         scope_module.delete()
         return Response({"success": True, "message": "Scope module deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class FormFieldListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -335,6 +346,7 @@ class FormFieldListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(request=FormFieldSerializer)
     def post(self, request):
         serializer = FormFieldSerializer(data=request.data)
         if serializer.is_valid():
@@ -345,7 +357,7 @@ class FormFieldListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class FormFieldRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -361,7 +373,8 @@ class FormFieldRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Form field not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = FormFieldSerializer(form_field)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=FormFieldSerializer)
     def put(self, request, pk):
         form_field = self.get_object(pk)
         if not form_field:

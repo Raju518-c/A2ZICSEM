@@ -1,5 +1,7 @@
 from django.shortcuts import render
-
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 # Create your views here.
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,7 +10,7 @@ from rest_framework import status
 from .models import EmploymentRecord
 from .serializers import EmploymentRecordSerializer
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class EmploymentRecordListCreateAPIView(APIView):
     """
     GET  : Get all employment records
@@ -31,7 +33,8 @@ class EmploymentRecordListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=EmploymentRecordSerializer)
     def post(self, request):
         serializer = EmploymentRecordSerializer(data=request.data)
 
@@ -58,7 +61,7 @@ class EmploymentRecordListCreateAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class EmploymentRecordRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve employment record by ID
@@ -94,7 +97,8 @@ class EmploymentRecordRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=EmploymentRecordSerializer)
     def put(self, request, pk):
         employment_record = self.get_object(pk)
 
@@ -158,7 +162,7 @@ class EmploymentRecordRetrieveUpdateDeleteAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProjectRecordListCreateAPIView(APIView):
     """
     GET  : Get all project records
@@ -181,7 +185,8 @@ class ProjectRecordListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProjectRecordSerializer)
     def post(self, request):
         serializer = ProjectRecordSerializer(data=request.data)
 
@@ -206,7 +211,7 @@ class ProjectRecordListCreateAPIView(APIView):
         )
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProjectRecordRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve project record by ID
@@ -242,7 +247,8 @@ class ProjectRecordRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProjectRecordSerializer)
     def put(self, request, pk):
         project_record = self.get_object(pk)
 
@@ -306,7 +312,7 @@ class ProjectRecordRetrieveUpdateDeleteAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProjectScopeListCreateAPIView(APIView):
     """
     GET  : Get all project scopes
@@ -332,7 +338,8 @@ class ProjectScopeListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProjectScopeSerializer)
     def post(self, request):
         serializer = ProjectScopeSerializer(data=request.data)
 
@@ -356,7 +363,7 @@ class ProjectScopeListCreateAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProjectScopeRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve project scope by ID
@@ -392,7 +399,8 @@ class ProjectScopeRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProjectScopeSerializer)
     def put(self, request, pk):
         project_scope = self.get_object(pk)
 
@@ -456,7 +464,7 @@ class ProjectScopeRetrieveUpdateDeleteAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeResponseListCreateAPIView(APIView):
     """
     GET  : Get all scope responses
@@ -484,7 +492,8 @@ class ScopeResponseListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ScopeResponseSerializer)
     def post(self, request):
         serializer = ScopeResponseSerializer(data=request.data)
 
@@ -510,7 +519,7 @@ class ScopeResponseListCreateAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ScopeResponseRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve scope response by ID
@@ -546,7 +555,8 @@ class ScopeResponseRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ScopeResponseSerializer)
     def put(self, request, pk):
         scope_response = self.get_object(pk)
 
@@ -607,8 +617,7 @@ class ScopeResponseRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ExposureLogListCreateAPIView(APIView):
     """
     GET  : Get all exposure logs
@@ -631,7 +640,8 @@ class ExposureLogListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ExposureLogSerializer)
     def post(self, request):
         serializer = ExposureLogSerializer(data=request.data)
 
@@ -656,7 +666,7 @@ class ExposureLogListCreateAPIView(APIView):
         )
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ExposureLogRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve exposure log by ID
@@ -692,7 +702,8 @@ class ExposureLogRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ExposureLogSerializer)
     def put(self, request, pk):
         exposure_log = self.get_object(pk)
 
@@ -756,7 +767,7 @@ class ExposureLogRetrieveUpdateDeleteAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalAssignmentListCreateAPIView(APIView):
     """
     GET  : Get all professional assignments
@@ -779,7 +790,8 @@ class ProfessionalAssignmentListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProfessionalAssignmentSerializer)
     def post(self, request):
         serializer = ProfessionalAssignmentSerializer(data=request.data)
 
@@ -806,7 +818,7 @@ class ProfessionalAssignmentListCreateAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalAssignmentRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve professional assignment by ID

@@ -1,3 +1,6 @@
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -6,7 +9,7 @@ from rest_framework.views import APIView
 from .models import Tenant, TenantOperation
 from .serializers import TenantOperationSerializer, TenantSerializer
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class TenantListCreateAPIView(APIView):
     """
     GET  : Get all tenants
@@ -27,7 +30,8 @@ class TenantListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=TenantSerializer)
     def post(self, request):
         serializer = TenantSerializer(data=request.data)
 
@@ -51,7 +55,7 @@ class TenantListCreateAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class TenantRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get tenant by ID
@@ -88,7 +92,8 @@ class TenantRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=TenantSerializer)
     def put(self, request, pk):
         tenant = self.get_object(pk)
 
@@ -145,7 +150,7 @@ class TenantRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class TenantOperationListCreateAPIView(APIView):
     """
     GET  : Get all tenant operations
@@ -168,7 +173,8 @@ class TenantOperationListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=TenantOperationSerializer)
     def post(self, request):
         serializer = TenantOperationSerializer(data=request.data)
 
@@ -192,7 +198,7 @@ class TenantOperationListCreateAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class TenantOperationRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get tenant operation by ID
@@ -229,7 +235,8 @@ class TenantOperationRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=TenantOperationSerializer)
     def put(self, request, pk):
         operation = self.get_object(pk)
 

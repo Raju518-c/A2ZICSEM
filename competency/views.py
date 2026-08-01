@@ -1,5 +1,7 @@
 from django.shortcuts import render
-
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 # Create your views here.
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,7 +10,7 @@ from rest_framework import status
 from .models import *
 from .serializers import *
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalScopeListCreateAPIView(APIView):
     """
     GET  : Get all professional scopes
@@ -34,7 +36,8 @@ class ProfessionalScopeListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProfessionalScopeSerializer)
     def post(self, request):
         serializer = ProfessionalScopeSerializer(data=request.data)
 
@@ -60,7 +63,7 @@ class ProfessionalScopeListCreateAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalScopeRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve professional scope by ID
@@ -96,7 +99,8 @@ class ProfessionalScopeRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProfessionalScopeSerializer)
     def put(self, request, pk):
         professional_scope = self.get_object(pk)
 
@@ -160,7 +164,7 @@ class ProfessionalScopeRetrieveUpdateDeleteAPIView(APIView):
 
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CompetencyAssessmentListCreateAPIView(APIView):
     """
     GET  : Get all competency assessments
@@ -183,7 +187,8 @@ class CompetencyAssessmentListCreateAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=CompetencyAssessmentSerializer)
     def post(self, request):
         serializer = CompetencyAssessmentSerializer(data=request.data)
 
@@ -208,7 +213,7 @@ class CompetencyAssessmentListCreateAPIView(APIView):
         )
 
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CompetencyAssessmentRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Retrieve competency assessment by ID
@@ -244,7 +249,8 @@ class CompetencyAssessmentRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=CompetencyAssessmentSerializer)
     def put(self, request, pk):
         competency_assessment = self.get_object(pk)
 

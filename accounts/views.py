@@ -1,14 +1,20 @@
 import logging
-
+from django.contrib.auth.models import User as AuthUser
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import FieldError, ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from core.choices import DataClassification, ResumeVisibility, VerificationStatus
+from evidence.models import EvidenceDocument
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from accounts.models import (
     ConsentRecord,
     OTPCooldownError,
@@ -26,6 +32,7 @@ from .serializers import (
     LogoutSerializer,
     OTPRequestSerializer,
     OTPVerifySerializer,
+    RegisterRequestSerializer,
     RegistrationApplicationSerializer,
     UserTblSerializer,
 )
@@ -52,7 +59,7 @@ def _deliver_otp(sent_to, raw_otp):
         fail_silently=True,
     )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class UserTblListCreateAPIView(APIView):
     """
     GET  : Get all users
@@ -66,7 +73,8 @@ class UserTblListCreateAPIView(APIView):
             {"success": True, "message": "Users fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=UserTblSerializer)
     def post(self, request):
         serializer = UserTblSerializer(data=request.data)
         if serializer.is_valid():
@@ -77,7 +85,7 @@ class UserTblListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class UserTblRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get user by ID
@@ -97,7 +105,8 @@ class UserTblRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = UserTblSerializer(user)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=UserTblSerializer)
     def put(self, request, pk):
         user = self.get_object(pk)
         if not user:
@@ -115,7 +124,7 @@ class UserTblRetrieveUpdateDeleteAPIView(APIView):
         user.delete()
         return Response({"success": True, "message": "User deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class RegistrationApplicationListCreateAPIView(APIView):
     """
     GET  : Get all registration applications
@@ -129,7 +138,8 @@ class RegistrationApplicationListCreateAPIView(APIView):
             {"success": True, "message": "Registration applications fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=RegistrationApplicationSerializer)
     def post(self, request):
         serializer = RegistrationApplicationSerializer(data=request.data)
         if serializer.is_valid():
@@ -140,7 +150,7 @@ class RegistrationApplicationListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get registration application by ID
@@ -161,6 +171,7 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
         serializer = RegistrationApplicationSerializer(application)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
+    @extend_schema(request=RegistrationApplicationSerializer)
     def put(self, request, pk):
         application = self.get_object(pk)
         if not application:
@@ -178,7 +189,7 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
         application.delete()
         return Response({"success": True, "message": "Registration application deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordListCreateAPIView(APIView):
     """
     GET  : Get all consent records
@@ -193,6 +204,7 @@ class ConsentRecordListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(request=ConsentRecordSerializer)
     def post(self, request):
         serializer = ConsentRecordSerializer(data=request.data)
         if serializer.is_valid():
@@ -203,7 +215,7 @@ class ConsentRecordListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
     """
     GET    : Get consent record by ID
@@ -224,6 +236,7 @@ class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
         serializer = ConsentRecordSerializer(consent_record)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
+    @extend_schema(request=ConsentRecordSerializer)
     def put(self, request, pk):
         consent_record = self.get_object(pk)
         if not consent_record:
@@ -241,9 +254,12 @@ class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
         consent_record.delete()
         return Response({"success": True, "message": "Consent record deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
+    
+    serializer_class = RegisterRequestSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def _resolve_tenant(self, tenant_value):
         if not tenant_value:
@@ -319,6 +335,89 @@ class RegisterAPIView(APIView):
             if normalized in {"false", "0", "no", "n", "none", "null", ""}:
                 return False
         return bool(value)
+    
+        def _get_or_create_resume_evidence_type(self, user):
+        try:
+            return ReferenceValue.objects.get(option_set="EVIDENCE_TYPE", code="RESUME")
+        except ReferenceValue.DoesNotExist:
+            creator = UserTbl.objects.filter(pk__in=AuthUser.objects.values("pk")).first()
+            if creator is None:
+                creator = UserTbl.objects.filter(is_superuser=True).first()
+            if creator is None:
+                creator = UserTbl.objects.order_by("pk").first()
+            if creator is None:
+                creator = user
+
+            return ReferenceValue.objects.create(
+                option_set="EVIDENCE_TYPE",
+                code="RESUME",
+                label="Resume",
+                created_by=creator,
+                is_system=True,
+                is_active=True,
+            )
+
+    def _get_or_create_profile_photo_evidence_type(self, user):
+        try:
+            return ReferenceValue.objects.get(option_set="EVIDENCE_TYPE", code="PHOTOGRAPH")
+        except ReferenceValue.DoesNotExist:
+            creator = UserTbl.objects.filter(pk__in=AuthUser.objects.values("pk")).first()
+            if creator is None:
+                creator = UserTbl.objects.filter(is_superuser=True).first()
+            if creator is None:
+                creator = UserTbl.objects.order_by("pk").first()
+            if creator is None:
+                creator = user
+
+            return ReferenceValue.objects.create(
+                option_set="EVIDENCE_TYPE",
+                code="PHOTOGRAPH",
+                label="Photograph",
+                created_by=creator,
+                is_system=True,
+                is_active=True,
+            )
+
+    def _create_resume_evidence(self, tenant, profile, user, resume_file):
+        if not resume_file:
+            return None
+
+        evidence_type = self._get_or_create_resume_evidence_type(user)
+        content_type = ContentType.objects.get_for_model(ProfessionalProfile)
+        evidence_document = EvidenceDocument.objects.create(
+            tenant=tenant,
+            professional=profile,
+            content_type=content_type,
+            object_id=profile.pk,
+            evidence_type=evidence_type,
+            file=resume_file,
+            data_classification=DataClassification.PROFESSIONAL,
+            resume_visibility=ResumeVisibility.CLIENT_SPECIFIC,
+            verification_status=VerificationStatus.EVIDENCE_UPLOADED,
+            processing_status=EvidenceDocument.ProcessingStatus.UPLOADED,
+        )
+        return evidence_document
+
+    def _create_profile_photo_evidence(self, tenant, profile, user, profile_photo_file):
+        if not profile_photo_file:
+            return None
+
+        evidence_type = self._get_or_create_profile_photo_evidence_type(user)
+        content_type = ContentType.objects.get_for_model(ProfessionalProfile)
+        evidence_document = EvidenceDocument.objects.create(
+            tenant=tenant,
+            professional=profile,
+            content_type=content_type,
+            object_id=profile.pk,
+            evidence_type=evidence_type,
+            file=profile_photo_file,
+            data_classification=DataClassification.PROFESSIONAL,
+            resume_visibility=ResumeVisibility.CLIENT_SPECIFIC,
+            verification_status=VerificationStatus.EVIDENCE_UPLOADED,
+            processing_status=EvidenceDocument.ProcessingStatus.UPLOADED,
+        )
+        return evidence_document
+
 
     def _build_profile_payload(self, profile_payload, profile):
         field_map = {
@@ -361,11 +460,23 @@ class RegisterAPIView(APIView):
         if getattr(profile, "first_name", "") and getattr(profile, "last_name", ""):
             profile.display_name = f"{profile.first_name} {profile.last_name}".strip()
 
+    @extend_schema(request=RegisterRequestSerializer)
     def post(self, request, *args, **kwargs):
-        payload = request.data or {}
+        serializer = RegisterRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = serializer.validated_data
         account_payload = payload.get("account") or {}
         profile_payload = payload.get("profile") or {}
         consent_payload = payload.get("consent") or {}
+        resume_file = payload.get("resume") or (profile_payload.get("resume") if isinstance(profile_payload, dict) else None)
+        profile_photo_file = payload.get("profile_photo")
+
+        if not isinstance(profile_payload, dict):
+            profile_payload = {}
+        if not isinstance(consent_payload, dict):
+            consent_payload = {}
 
         email = (account_payload.get("email") or "").strip().lower()
         password = account_payload.get("password") or ""
@@ -465,6 +576,12 @@ class RegisterAPIView(APIView):
                 if consent_records:
                     ConsentRecord.objects.bulk_create(consent_records)
 
+                resume_evidence = self._create_resume_evidence(tenant, profile, user, resume_file)
+                photo_evidence = self._create_profile_photo_evidence(tenant, profile, user, profile_photo_file)
+                if photo_evidence:
+                    profile.profile_photo_evidence = photo_evidence
+                    profile.save(update_fields=["profile_photo_evidence", "updated_at"])
+
                 return Response(
                     {
                         "success": True,
@@ -474,6 +591,8 @@ class RegisterAPIView(APIView):
                             "user_id": str(user.public_id),
                             "application_id": str(application.public_id),
                             "profile_id": str(profile.public_id),
+                            "resume_evidence_document_id": str(resume_evidence.public_id) if resume_evidence else None,
+                            "photo_evidence_document_id": str(photo_evidence.public_id) if photo_evidence else None,                            
                         },
                     },
                     status=status.HTTP_201_CREATED,
@@ -481,11 +600,12 @@ class RegisterAPIView(APIView):
         except ValueError as exc:
             return Response({"success": False, "message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
 
+    @extend_schema(request=LoginSerializer)
     def post(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -529,11 +649,12 @@ class LoginAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class LogoutAPIView(APIView):
     permission_classes = [AllowAny]
     serializer_class = LogoutSerializer
 
+    @extend_schema(request=LogoutSerializer)
     def post(self, request, *args, **kwargs):
         request.session.flush()
         return Response(

@@ -1,3 +1,6 @@
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -18,7 +21,7 @@ from .serializers import (
     ProfessionalReviewSerializer,
 )
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalProfileListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -29,7 +32,8 @@ class ProfessionalProfileListCreateAPIView(APIView):
             {"success": True, "message": "Professional profiles fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProfessionalProfileSerializer)
     def post(self, request):
         serializer = ProfessionalProfileSerializer(data=request.data)
         if serializer.is_valid():
@@ -40,7 +44,7 @@ class ProfessionalProfileListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalProfileRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -56,7 +60,8 @@ class ProfessionalProfileRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Professional profile not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = ProfessionalProfileSerializer(profile)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=ProfessionalProfileSerializer)
     def put(self, request, pk):
         profile = self.get_object(pk)
         if not profile:
@@ -74,7 +79,7 @@ class ProfessionalProfileRetrieveUpdateDeleteAPIView(APIView):
         profile.delete()
         return Response({"success": True, "message": "Professional profile deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalReviewListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -85,7 +90,8 @@ class ProfessionalReviewListCreateAPIView(APIView):
             {"success": True, "message": "Professional reviews fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ProfessionalReviewSerializer)
     def post(self, request):
         serializer = ProfessionalReviewSerializer(data=request.data)
         if serializer.is_valid():
@@ -96,7 +102,7 @@ class ProfessionalReviewListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ProfessionalReviewRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -112,7 +118,8 @@ class ProfessionalReviewRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Professional review not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = ProfessionalReviewSerializer(review)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=ProfessionalReviewSerializer)
     def put(self, request, pk):
         review = self.get_object(pk)
         if not review:
@@ -130,7 +137,7 @@ class ProfessionalReviewRetrieveUpdateDeleteAPIView(APIView):
         review.delete()
         return Response({"success": True, "message": "Professional review deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CredentialRecordListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -141,7 +148,8 @@ class CredentialRecordListCreateAPIView(APIView):
             {"success": True, "message": "Credential records fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=CredentialRecordSerializer)
     def post(self, request):
         serializer = CredentialRecordSerializer(data=request.data)
         if serializer.is_valid():
@@ -152,7 +160,7 @@ class CredentialRecordListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CredentialRecordRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -168,7 +176,8 @@ class CredentialRecordRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Credential record not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = CredentialRecordSerializer(credential)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=CredentialRecordSerializer)
     def put(self, request, pk):
         credential = self.get_object(pk)
         if not credential:
@@ -186,7 +195,7 @@ class CredentialRecordRetrieveUpdateDeleteAPIView(APIView):
         credential.delete()
         return Response({"success": True, "message": "Credential record deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CapabilityRecordListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -197,7 +206,8 @@ class CapabilityRecordListCreateAPIView(APIView):
             {"success": True, "message": "Capability records fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=CapabilityRecordSerializer)
     def post(self, request):
         serializer = CapabilityRecordSerializer(data=request.data)
         if serializer.is_valid():
@@ -208,7 +218,7 @@ class CapabilityRecordListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class CapabilityRecordRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -224,7 +234,8 @@ class CapabilityRecordRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Capability record not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = CapabilityRecordSerializer(capability)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=CapabilityRecordSerializer)
     def put(self, request, pk):
         capability = self.get_object(pk)
         if not capability:
@@ -242,7 +253,7 @@ class CapabilityRecordRetrieveUpdateDeleteAPIView(APIView):
         capability.delete()
         return Response({"success": True, "message": "Capability record deleted successfully."}, status=status.HTTP_200_OK)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ContactRecordListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -253,7 +264,8 @@ class ContactRecordListCreateAPIView(APIView):
             {"success": True, "message": "Contact records fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
-
+    
+    @extend_schema(request=ContactRecordSerializer)
     def post(self, request):
         serializer = ContactRecordSerializer(data=request.data)
         if serializer.is_valid():
@@ -264,7 +276,7 @@ class ContactRecordListCreateAPIView(APIView):
             )
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class ContactRecordRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -280,7 +292,8 @@ class ContactRecordRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Contact record not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = ContactRecordSerializer(contact)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
-
+    
+    @extend_schema(request=ContactRecordSerializer)
     def put(self, request, pk):
         contact = self.get_object(pk)
         if not contact:

@@ -1,3 +1,4 @@
+import json
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models import F
@@ -52,6 +53,66 @@ def _resolve_user(tenant_value, email):
     if len(users) == 1:
         return users[0]
     return None
+
+class AccountRegistrationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    mobile_country_code = serializers.CharField(required=True, allow_blank=False)
+    mobile_number = serializers.CharField(required=True, allow_blank=False)
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    two_factor_preference = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class ProfileRegistrationSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    middle_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    preferred_name = serializers.CharField(required=False, allow_blank=True)
+    country_of_residence = serializers.CharField(required=False, allow_blank=True)
+    city = serializers.CharField(required=False, allow_blank=True)
+    time_zone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    primary_industry = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    primary_scope = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    career_stage = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    current_job_title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    total_experience_band = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    highest_qualification = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    name_order = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    existing_resume = serializers.BooleanField(required=False, default=False)
+    
+    
+
+
+class ConsentRegistrationSerializer(serializers.Serializer):
+    terms = serializers.BooleanField(required=False, default=False)
+    privacy = serializers.BooleanField(required=False, default=False)
+    resume_processing = serializers.BooleanField(required=False, default=False)
+    marketing = serializers.BooleanField(required=False, default=False)
+
+
+class RegisterRequestSerializer(serializers.Serializer):
+    tenant_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    tenant = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    account = AccountRegistrationSerializer(required=True)
+    profile = ProfileRegistrationSerializer(required=False, default={})
+    consent = ConsentRegistrationSerializer(required=False, default={})
+    resume = serializers.FileField(required=False, allow_null=True, write_only=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True, write_only=True)
+
+    def to_internal_value(self, data):
+        if not isinstance(data, dict):
+            data = data.dict() if hasattr(data, "dict") else data
+
+        normalized_data = {}
+        for key, value in data.items():
+            if key in {"account", "profile", "consent"} and isinstance(value, str):
+                try:
+                    normalized_data[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    normalized_data[key] = value
+            else:
+                normalized_data[key] = value
+
+        return super().to_internal_value(normalized_data)
 
 
 class UserTblSerializer(serializers.ModelSerializer):

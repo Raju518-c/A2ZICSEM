@@ -20,11 +20,14 @@ from django.contrib.auth.hashers import (
 from django.core.exceptions import ValidationError
 import secrets
 
+from datetime import timedelta
+
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import F, Q
 from django.db.models.functions import Lower
+from django.utils import timezone
 
 from core.models import CreatedOnlyModel, TimeStampedModel, UUIDModel
 from core.validators import validate_calling_code, validate_iso_country_code
@@ -525,3 +528,121 @@ class ConsentRecord(CreatedOnlyModel):
 
     def __str__(self):
         return f"{self.user} — {self.consent_type}"
+
+
+class OTPCooldownError(Exception):
+    """Raised by OTPVerification.issue() when a resend is requested before
+    RESEND_COOLDOWN_SECONDS has elapsed since the last OTP of that type.
+    """
+
+    def __init__(self, seconds_remaining):
+        self.seconds_remaining = seconds_remaining
+        super().__init__(f"Please wait {seconds_remaining}s before requesting another code.")
+
+
+class OTPVerification(models.Model):
+    """One-time password issued for email/mobile verification, login MFA,
+    or password reset.
+
+    Key rules: OTP is stored hashed, never plain text. Tenant is reached
+    via user.tenant; not denormalized since OTPs are always looked up by
+    user, never listed per-tenant.
+    """
+
+    OTP_TTL_MINUTES = 10
+    MAX_ATTEMPTS = 5
+    RESEND_COOLDOWN_SECONDS = 60
+
+    class OTPType(models.TextChoices):
+        EMAIL = "EMAIL", "Email Verification"
+        MOBILE = "MOBILE", "Mobile Verification"
+        LOGIN = "LOGIN", "Login"
+        PASSWORD_RESET = "PASSWORD_RESET", "Password Reset"
+
+    user = models.ForeignKey(
+        UserTbl,
+        on_delete=models.CASCADE,
+        related_name="otp_verifications",
+    )
+    otp_type = models.CharField(
+        max_length=30,
+        choices=OTPType.choices,
+    )
+    otp = models.CharField(
+        max_length=128,
+        help_text="Hashed OTP; never stored or returned as plain text.",
+    )
+    sent_to = models.CharField(
+        max_length=254,
+        help_text="Actual destination address/number the OTP was sent to.",
+    )
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(
+        default=False,
+    )
+    attempts = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Failed verification attempt counter.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        db_table = "accounts_otp_verification"
+        verbose_name = "OTP Verification"
+        verbose_name_plural = "OTP Verifications"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["user", "otp_type", "is_used"],
+                name="idx_otp_user_type_used",
+            ),
+            models.Index(
+                fields=["expires_at"],
+                name="idx_otp_expires_at",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(expires_at__gt=F("created_at")),
+                name="chk_otp_expires_after_created",
+            ),
+        ]
+
+    @classmethod
+    def issue(cls, *, user, otp_type, sent_to, ttl_minutes=None):
+        """Invalidate any pending OTP of this type for the user and issue
+        a new one, atomically. Returns (instance, raw_otp); raw_otp is
+        never stored. Raises OTPCooldownError if the last OTP of this
+        type was issued within RESEND_COOLDOWN_SECONDS.
+        """
+        with transaction.atomic():
+            last = (
+                cls.objects.select_for_update()
+                .filter(user=user, otp_type=otp_type)
+                .order_by("-created_at")
+                .first()
+            )
+            if last is not None:
+                elapsed = (timezone.now() - last.created_at).total_seconds()
+                remaining = cls.RESEND_COOLDOWN_SECONDS - elapsed
+                if remaining > 0:
+                    raise OTPCooldownError(int(remaining) + 1)
+
+            cls.objects.filter(user=user, otp_type=otp_type, is_used=False).update(is_used=True)
+            raw_otp = f"{secrets.randbelow(10 ** 6):06d}"
+            instance = cls.objects.create(
+                user=user,
+                otp_type=otp_type,
+                sent_to=sent_to,
+                otp=make_password(raw_otp),
+                expires_at=timezone.now() + timedelta(minutes=ttl_minutes or cls.OTP_TTL_MINUTES),
+            )
+        return instance, raw_otp
+
+    def check_otp(self, raw_otp):
+        return django_check_password(raw_otp, self.otp)
+
+    def __str__(self):
+        return f"{self.user} - {self.otp_type}"

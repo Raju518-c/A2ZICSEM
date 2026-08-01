@@ -1,4 +1,7 @@
+import logging
+
 from django.core.exceptions import FieldError, ValidationError
+from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -6,7 +9,13 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import ConsentRecord, RegistrationApplication, UserTbl
+from accounts.models import (
+    ConsentRecord,
+    OTPCooldownError,
+    OTPVerification,
+    RegistrationApplication,
+    UserTbl,
+)
 from catalog.models import ReferenceValue, ScopeCatalog
 from professionals.models import ProfessionalProfile
 from tenancy.models import Tenant
@@ -15,9 +24,33 @@ from .serializers import (
     ConsentRecordSerializer,
     LoginSerializer,
     LogoutSerializer,
+    OTPRequestSerializer,
+    OTPVerifySerializer,
     RegistrationApplicationSerializer,
     UserTblSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _deliver_otp(sent_to, raw_otp):
+    """Sends the OTP to an email address, or logs it when sent_to is a
+    mobile number (no SMS gateway is wired up in this project yet).
+    """
+    if "@" not in sent_to:
+        logger.info("OTP for %s: %s (SMS gateway not configured)", sent_to, raw_otp)
+        return
+
+    send_mail(
+        subject="Your verification code",
+        message=(
+            f"Your verification code is {raw_otp}. It expires in "
+            f"{OTPVerification.OTP_TTL_MINUTES} minutes."
+        ),
+        from_email=None,
+        recipient_list=[sent_to],
+        fail_silently=True,
+    )
 
 
 class UserTblListCreateAPIView(APIView):
@@ -211,8 +244,7 @@ class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
 
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
-    
-    
+
     def _resolve_tenant(self, tenant_value):
         if not tenant_value:
             return None
@@ -238,7 +270,6 @@ class RegisterAPIView(APIView):
 
         # Portal slug
         return Tenant.objects.filter(portal_slug=tenant_value).first()
-
 
     def _resolve_reference_value(self, value):
         if not value:
@@ -509,3 +540,141 @@ class LogoutAPIView(APIView):
             {"status": "success", "message": "Logout successful."},
             status=status.HTTP_200_OK,
         )
+
+
+class OTPRequestAPIView(APIView):
+    """
+    POST : Issue an OTP for otp_type in {EMAIL, MOBILE, LOGIN, PASSWORD_RESET}.
+    EMAIL/MOBILE also cover re-verifying a changed address via new_value.
+    LOGIN validates the password and requires MFA to be enabled first.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = OTPRequestSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data.get("user")
+        otp_type = serializer.validated_data["otp_type"]
+        sent_to = serializer.validated_data.get("sent_to")
+
+        generic_response = Response(
+            {
+                "success": True,
+                "message": "If the details are valid, a verification code has been sent.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+        if user is None:
+            return generic_response
+
+        try:
+            _, raw_otp = OTPVerification.issue(user=user, otp_type=otp_type, sent_to=sent_to)
+        except OTPCooldownError as exc:
+            # PASSWORD_RESET keeps the generic response even on cooldown,
+            # otherwise a 429 vs 200 becomes an account-existence oracle.
+            if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
+                return generic_response
+            return Response(
+                {"success": False, "message": str(exc)},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        _deliver_otp(sent_to, raw_otp)
+        return generic_response
+
+
+class OTPVerifyAPIView(APIView):
+    """
+    POST : Verify an OTP and apply its effect.
+    EMAIL/MOBILE mark the address verified (and apply new_value if this
+    was a change). PASSWORD_RESET sets new_password. LOGIN completes the
+    session, mirroring LoginAPIView's response shape.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = OTPVerifySerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        row = serializer.validated_data["otp_row"]
+        otp_type = serializer.validated_data["otp_type"]
+
+        # is_used is committed together with the side effect below: if the
+        # user update fails, the OTP stays valid instead of being burned.
+        with transaction.atomic():
+            row.is_used = True
+            row.save(update_fields=["is_used"])
+
+            if otp_type == OTPVerification.OTPType.EMAIL:
+                user.email = row.sent_to
+                user.email_verified_at = timezone.now()
+                user.save(update_fields=["email", "email_verified_at", "updated_at"])
+                return Response(
+                    {"success": True, "message": "Email verified successfully."},
+                    status=status.HTTP_200_OK,
+                )
+
+            if otp_type == OTPVerification.OTPType.MOBILE:
+                prefix = user.mobile_country_code
+                number = row.sent_to[len(prefix):] if row.sent_to.startswith(prefix) else row.sent_to
+                user.mobile_number = number
+                user.mobile_verified_at = timezone.now()
+                user.save(update_fields=["mobile_number", "mobile_verified_at", "updated_at"])
+                return Response(
+                    {"success": True, "message": "Mobile number verified successfully."},
+                    status=status.HTTP_200_OK,
+                )
+
+            if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
+                user.password = serializer.validated_data["new_password"]
+                user.save(update_fields=["password", "updated_at"])
+                return Response(
+                    {"success": True, "message": "Password reset successfully."},
+                    status=status.HTTP_200_OK,
+                )
+
+            # LOGIN — same session bootstrap and response shape as LoginAPIView.
+            user.last_login = timezone.now()
+            user.save(update_fields=["last_login", "updated_at"])
+
+            request.session.flush()
+            request.session["user_id"] = user.id
+            request.session["tenant_id"] = str(user.tenant.id) if user.tenant else None
+            request.session["is_authenticated"] = True
+            request.session.save()
+
+            tenant_payload = None
+            if user.tenant:
+                tenant_payload = {
+                    "id": str(user.tenant.public_id),
+                    "name": user.tenant.name,
+                    "portal_slug": user.tenant.portal_slug,
+                    "status": user.tenant.status,
+                }
+
+            professional_profile = ProfessionalProfile.objects.filter(user=user).first()
+            profile_payload = {
+                "id": user.id,
+                "public_id": str(user.public_id),
+                "first_name": professional_profile.first_name if professional_profile else "",
+                "last_name": professional_profile.last_name if professional_profile else "",
+            }
+
+            return Response(
+                {
+                    "status": "success",
+                    "tenant": tenant_payload,
+                    "role": [role.name for role in user.role.all()],
+                    "is_candidate": user.is_candidate,
+                    "is_mentor": user.is_mentor,
+                    "user": profile_payload,
+                },
+                status=status.HTTP_200_OK,
+            )

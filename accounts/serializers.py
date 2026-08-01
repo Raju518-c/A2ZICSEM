@@ -1,8 +1,57 @@
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db.models import F
+from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import ConsentRecord, RegistrationApplication, UserTbl
+from accounts.models import (
+    ConsentRecord,
+    OTPVerification,
+    RegistrationApplication,
+    UserTbl,
+    validate_mobile_number,
+)
 from tenancy.models import Tenant
+
+
+def _resolve_tenant(tenant_value):
+    if not tenant_value:
+        return None
+
+    tenant_value = str(tenant_value).strip()
+    if not tenant_value:
+        return None
+
+    tenant = None
+    for lookup in (
+        {"public_id": tenant_value},
+        {"id": tenant_value},
+        {"portal_slug": tenant_value},
+    ):
+        if tenant:
+            break
+        try:
+            tenant = Tenant.objects.filter(**lookup).first()
+        except (ValueError, ValidationError):
+            continue
+
+    return tenant
+
+
+def _resolve_user(tenant_value, email):
+    tenant = _resolve_tenant(tenant_value) if tenant_value else None
+    email = (email or "").strip().lower()
+
+    if tenant is not None:
+        users = list(UserTbl.objects.filter(tenant=tenant, email__iexact=email))
+    else:
+        users = list(
+            UserTbl.objects.filter(email__iexact=email, role__roles_for="super admin")
+        )
+
+    if len(users) == 1:
+        return users[0]
+    return None
 
 
 class UserTblSerializer(serializers.ModelSerializer):
@@ -136,4 +185,183 @@ class LoginSerializer(serializers.Serializer):
 
 class LogoutSerializer(serializers.Serializer):
     pass
+
+
+class OTPRequestSerializer(serializers.Serializer):
+    """Issues an OTP. One endpoint for all otp_type values:
+    EMAIL/MOBILE cover both initial verification and re-verification of a
+    changed address (pass new_value); LOGIN performs the password check
+    and issues a second-factor code when the account has MFA enabled;
+    PASSWORD_RESET issues a code to the account's registered email.
+    """
+
+    otp_type = serializers.ChoiceField(choices=OTPVerification.OTPType.choices)
+    tenant = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Tenant id, public_id, or portal slug.",
+    )
+    email = serializers.EmailField(help_text="Account's current login email.")
+    password = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+        write_only=True,
+        help_text="Required only when otp_type=LOGIN.",
+    )
+    new_value = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text=(
+            "Required only for EMAIL/MOBILE when re-verifying a changed "
+            "address: the new email, or the new mobile number (digits "
+            "only, no country code)."
+        ),
+    )
+
+    def validate(self, attrs):
+        otp_type = attrs["otp_type"]
+        user = _resolve_user(attrs.get("tenant"), attrs["email"])
+        new_value = (attrs.get("new_value") or "").strip()
+
+        if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
+            # Do not reveal whether the account exists.
+            attrs["user"] = user
+            attrs["sent_to"] = user.email if user else None
+            return attrs
+
+        if user is None:
+            raise serializers.ValidationError({"email": ["No matching account found."]})
+
+        if otp_type == OTPVerification.OTPType.LOGIN:
+            password = attrs.get("password") or ""
+            if not password:
+                raise serializers.ValidationError({"password": ["Password is required."]})
+            if not user.is_active:
+                raise serializers.ValidationError({"email": ["This account is inactive."]})
+            if user.approval_status != UserTbl.ApprovalStatus.APPROVED:
+                raise serializers.ValidationError(
+                    {"email": ["This account is not approved for login."]}
+                )
+            if not user.check_password(password):
+                raise serializers.ValidationError({"password": ["Invalid credentials."]})
+            if user.mfa_method == UserTbl.MfaMethod.NONE:
+                raise serializers.ValidationError(
+                    {"otp_type": ["MFA is not enabled for this account."]}
+                )
+            if user.mfa_method == UserTbl.MfaMethod.AUTHENTICATOR:
+                raise serializers.ValidationError(
+                    {"otp_type": ["This account uses an authenticator app, not OTP."]}
+                )
+            sent_to = (
+                user.email
+                if user.mfa_method == UserTbl.MfaMethod.EMAIL
+                else f"{user.mobile_country_code}{user.mobile_number}"
+            )
+
+        elif otp_type == OTPVerification.OTPType.EMAIL:
+            sent_to = new_value.lower() if new_value else user.email
+            if new_value:
+                serializers.EmailField().run_validation(new_value)
+                if (
+                    UserTbl.objects.filter(tenant=user.tenant, email__iexact=new_value)
+                    .exclude(pk=user.pk)
+                    .exists()
+                ):
+                    raise serializers.ValidationError(
+                        {"new_value": ["This email is already in use."]}
+                    )
+
+        elif otp_type == OTPVerification.OTPType.MOBILE:
+            number = new_value if new_value else user.mobile_number
+            if new_value:
+                try:
+                    validate_mobile_number(new_value)
+                except ValidationError as exc:
+                    raise serializers.ValidationError({"new_value": exc.messages}) from exc
+                if (
+                    UserTbl.objects.filter(
+                        tenant=user.tenant,
+                        mobile_country_code=user.mobile_country_code,
+                        mobile_number=new_value,
+                    )
+                    .exclude(pk=user.pk)
+                    .exists()
+                ):
+                    raise serializers.ValidationError(
+                        {"new_value": ["This mobile number is already in use."]}
+                    )
+            # Delivery needs the calling code; the digits-only number is
+            # recovered from this on verify (see OTPVerifyAPIView).
+            sent_to = f"{user.mobile_country_code}{number}"
+        else:
+            raise serializers.ValidationError({"otp_type": ["Unsupported OTP type."]})
+
+        attrs["user"] = user
+        attrs["sent_to"] = sent_to
+        return attrs
+
+
+class OTPVerifySerializer(serializers.Serializer):
+    """Verifies an OTP and applies the effect for its otp_type: marks
+    email/mobile verified, resets the password, or completes login.
+    """
+
+    otp_type = serializers.ChoiceField(choices=OTPVerification.OTPType.choices)
+    tenant = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Tenant id, public_id, or portal slug.",
+    )
+    email = serializers.EmailField(help_text="Account's current login email.")
+    otp = serializers.CharField(max_length=6, min_length=6, trim_whitespace=False)
+    new_password = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+        write_only=True,
+        help_text="Required only when otp_type=PASSWORD_RESET.",
+    )
+
+    def validate(self, attrs):
+        otp_type = attrs["otp_type"]
+        user = _resolve_user(attrs.get("tenant"), attrs["email"])
+        generic_error = {"otp": ["Invalid or expired code."]}
+
+        if user is None:
+            raise serializers.ValidationError(generic_error)
+
+        row = (
+            OTPVerification.objects.filter(
+                user=user,
+                otp_type=otp_type,
+                is_used=False,
+                expires_at__gt=timezone.now(),
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if row is None or row.attempts >= OTPVerification.MAX_ATTEMPTS:
+            raise serializers.ValidationError(generic_error)
+
+        if not row.check_otp(attrs["otp"]):
+            OTPVerification.objects.filter(pk=row.pk).update(attempts=F("attempts") + 1)
+            raise serializers.ValidationError(generic_error)
+
+        if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
+            new_password = attrs.get("new_password") or ""
+            try:
+                validate_password(new_password, user=user)
+            except ValidationError as exc:
+                raise serializers.ValidationError({"new_password": exc.messages}) from exc
+
+        # otp_row is not marked used here: the view applies it and the
+        # side effect (email/mobile/password/login) inside one
+        # transaction, so a downstream failure leaves the OTP usable.
+        attrs["user"] = user
+        attrs["otp_row"] = row
+        return attrs
 

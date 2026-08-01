@@ -210,6 +210,14 @@ class UserTbl(UUIDModel):
     date_joined = models.DateTimeField(
         auto_now_add=True, help_text="User creation timestamp."
     )
+    
+    referral_source= models.CharField(
+        max_length=100,null=True, blank=True, help_text="Referral source of the user."
+    )
+    referral_code=models.CharField(
+        max_length=100,null=True, blank=True, help_text="Referral code of the user."
+    )
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     # Django still requires a unique USERNAME_FIELD on AUTH_USER_MODEL.

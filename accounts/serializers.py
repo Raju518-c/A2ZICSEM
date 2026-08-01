@@ -55,49 +55,56 @@ def _resolve_user(tenant_value, email):
         return users[0]
     return None
 
-class AccountRegistrationSerializer(serializers.Serializer):
+
+class CheckUserExistsRequestSerializer(serializers.Serializer):
+    tenant_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Alternate tenant identifier field.",
+    )
+    email = serializers.EmailField(
+        help_text="Email address to check for an existing account in the selected tenant."
+    )
+
+
+class RegisterRequestSerializer(serializers.Serializer):
+    
+    #Accounts
+    tenant = serializers.CharField(required=False, allow_blank=True, allow_null=True)        
     email = serializers.EmailField()
     mobile_country_code = serializers.CharField(required=True, allow_blank=False)
     mobile_number = serializers.CharField(required=True, allow_blank=False)
-    password = serializers.CharField(write_only=True, trim_whitespace=False)
-    two_factor_preference = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-
-
-class ProfileRegistrationSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, trim_whitespace=False)    
+    mfa_method = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    referral_source = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    referral_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+        
+    #Profile
     first_name = serializers.CharField(required=False, allow_blank=True)
     middle_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     preferred_name = serializers.CharField(required=False, allow_blank=True)
+    name_display_order = serializers.CharField(required=False, allow_blank=True, allow_null=True)    
     country_of_residence = serializers.CharField(required=False, allow_blank=True)
     city = serializers.CharField(required=False, allow_blank=True)
     time_zone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     primary_industry = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     primary_scope = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    career_stage = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    self_declared_career_stage = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     current_job_title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    total_experience_band = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    highest_qualification = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    name_order = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    existing_resume = serializers.BooleanField(required=False, default=False)
+    initial_experience_band = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    highest_qualification_level = serializers.CharField(required=False, allow_blank=True, allow_null=True)    
+    existing_resume = serializers.FileField(required=False, allow_null=True, write_only=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True, write_only=True)
     
-    
-
-
-class ConsentRegistrationSerializer(serializers.Serializer):
+    #consent
     terms = serializers.BooleanField(required=False, default=False)
     privacy = serializers.BooleanField(required=False, default=False)
     resume_processing = serializers.BooleanField(required=False, default=False)
-    marketing = serializers.BooleanField(required=False, default=False)
-
-
-class RegisterRequestSerializer(serializers.Serializer):
-    tenant_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    tenant = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    account = AccountRegistrationSerializer(required=True)
-    profile = ProfileRegistrationSerializer(required=False, default={})
-    consent = ConsentRegistrationSerializer(required=False, default={})
-    resume = serializers.FileField(required=False, allow_null=True, write_only=True)
-    profile_photo = serializers.FileField(required=False, allow_null=True, write_only=True)
+    marketing = serializers.BooleanField(required=False, default=False)    
+    
+    
 
     def to_internal_value(self, data):
         if not isinstance(data, dict):
@@ -312,11 +319,11 @@ class OTPRequestSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         otp_type = attrs["otp_type"]
-        tenant = _resolve_tenant(attrs.get("tenant") or attrs.get("tenant_id"))
+        tenant = _resolve_tenant(attrs.get("tenant_id") or attrs.get("tenant"))
         email = (attrs.get("email") or "").strip().lower()
         new_value = (attrs.get("new_value") or "").strip()
         password = attrs.get("password") or ""
-        user = _resolve_user(attrs.get("tenant") or attrs.get("tenant_id"), email)
+        user = _resolve_user(attrs.get("tenant_id") or attrs.get("tenant"), email)
 
         if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
             # Do not reveal whether the account exists.
@@ -481,10 +488,10 @@ class OTPVerifySerializer(serializers.Serializer):
 
     def validate(self, attrs):
         otp_type = attrs["otp_type"]
-        tenant = _resolve_tenant(attrs.get("tenant") or attrs.get("tenant_id"))
+        tenant = _resolve_tenant(attrs.get("tenant_id") or attrs.get("tenant"))
         email = (attrs.get("email") or "").strip().lower()
         new_value = (attrs.get("new_value") or "").strip()
-        user = _resolve_user(attrs.get("tenant") or attrs.get("tenant_id"), email)
+        user = _resolve_user(attrs.get("tenant_id") or attrs.get("tenant"), email)
         generic_error = {"otp": ["Invalid or expired code."]}
 
         if otp_type == OTPVerification.OTPType.LOGIN:

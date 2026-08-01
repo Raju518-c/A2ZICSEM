@@ -223,6 +223,15 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
     linkedin_url = models.URLField(
         max_length=500, blank=True, help_text="LinkedIn profile link."
     )
+    existing_resume = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="professional_profiles_resume",
+        help_text="Optional professional resume. Evidence type must be "
+        "RESUME and same professional.",
+    )
     profile_photo_evidence = models.ForeignKey(
         "evidence.EvidenceDocument",
         on_delete=models.SET_NULL,

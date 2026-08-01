@@ -198,6 +198,27 @@ MEDIA_ROOT = BASE_DIR / "media"
 FIELD_ENCRYPTION_KEY = env("FIELD_ENCRYPTION_KEY", "")
 
 # ---------------------------------------------------------------------------
+# Email (OTP delivery, notifications)
+# ---------------------------------------------------------------------------
+# Defaults to the console backend in DEBUG so OTP emails are visible in the
+# runserver output with zero setup. Set real values in .env — never hardcode
+# credentials here. EMAIL_HOST_PASSWORD is a Gmail App Password, not the
+# account password (Gmail SMTP requires 2FA + an App Password).
+
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = env("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(env("EMAIL_PORT", 587))
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env("EMAIL_USE_TLS", "true").lower() == "true"
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@qualion.local")
+
+# ---------------------------------------------------------------------------
 # Django REST Framework
 # ---------------------------------------------------------------------------
 
@@ -300,11 +321,5 @@ LOGGING = {
     },
 }
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'iiiqbetspython@gmail.com'
-EMAIL_HOST_PASSWORD = 'tiln uqjg ijjz wklr'
 
 

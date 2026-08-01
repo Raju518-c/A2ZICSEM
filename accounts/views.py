@@ -27,6 +27,7 @@ from professionals.models import ProfessionalProfile
 from tenancy.models import Tenant
 
 from .serializers import (
+    CheckUserExistsRequestSerializer,
     ConsentRecordSerializer,
     LoginSerializer,
     LogoutSerializer,
@@ -270,7 +271,7 @@ class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
     
-    serializer_class = RegisterRequestSerializer
+    # serializer_class = RegisterRequestSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def _resolve_tenant(self, tenant_value):
@@ -443,11 +444,11 @@ class RegisterAPIView(APIView):
             "timezone": "timezone",
             "primary_industry": "primary_industry",
             "primary_scope": "primary_scope",
-            "career_stage": "self_declared_career_stage",
+            "self_declared_career_stage": "self_declared_career_stage",
             "current_job_title": "current_job_title",
-            "total_experience_band": "initial_experience_band",
-            "highest_qualification": "highest_qualification_level",
-            "name_order": "name_display_order",
+            "initial_experience_band": "initial_experience_band",
+            "highest_qualification_level": "highest_qualification_level",
+            "name_display_order": "name_display_order",
         }
 
         for source_key, target_key in field_map.items():
@@ -475,35 +476,32 @@ class RegisterAPIView(APIView):
     @extend_schema(request=RegisterRequestSerializer)
     def post(self, request, *args, **kwargs):
         serializer = RegisterRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
 
         payload = serializer.validated_data
-        account_payload = payload.get("account") or {}
-        profile_payload = payload.get("profile") or {}
-        consent_payload = payload.get("consent") or {}
-        resume_file = payload.get("resume") or (profile_payload.get("resume") if isinstance(profile_payload, dict) else None)
+        resume_file = payload.get("existing_resume")
         profile_photo_file = payload.get("profile_photo")
 
-        if not isinstance(profile_payload, dict):
-            profile_payload = {}
-        if not isinstance(consent_payload, dict):
-            consent_payload = {}
-
-        email = (account_payload.get("email") or "").strip().lower()
-        password = account_payload.get("password") or ""
-        mobile_country_code = (account_payload.get("mobile_country_code") or "").strip()
-        mobile_number = (account_payload.get("mobile_number") or "").strip()
+        email = (payload.get("email") or "").strip().lower()
+        password = payload.get("password") or ""
+        mobile_country_code = (payload.get("mobile_country_code") or "").strip()
+        mobile_number = (payload.get("mobile_number") or "").strip()
 
         if not email or not password or not mobile_country_code or not mobile_number:
-            return Response({"success": False, "message": "Email, password, mobile country code, and mobile number are required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "Email, password, mobile country code, and mobile number are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        tenant = self._resolve_tenant(payload.get("tenant_id") or payload.get("tenant"))
+        tenant = self._resolve_tenant(payload.get("tenant"))
         if not tenant:
             return Response({"success": False, "message": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         if UserTbl.objects.filter(tenant=tenant, email__iexact=email).exists():
-            return Response({"success": False, "message": "A user with this email already exists for the tenant."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "A user with this email already exists for the tenant."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             with transaction.atomic():
@@ -516,13 +514,14 @@ class RegisterAPIView(APIView):
                     approval_status=UserTbl.ApprovalStatus.APPROVED,
                     approved_at=timezone.now(),
                     is_active=True,
-                    is_candidate=True,
+                    is_candidate=False,
                     is_mentor=False,
+                    referral_source=payload.get("referral_source") or None,
+                    referral_code=payload.get("referral_code") or None,
                 )
 
-                two_factor_preference = account_payload.get("two_factor_preference") or account_payload.get("mfa_method")
-                if two_factor_preference:
-                    normalized_method = str(two_factor_preference).upper()
+                if payload.get("mfa_method"):
+                    normalized_method = str(payload.get("mfa_method")).upper()
                     mfa_map = {
                         "NONE": UserTbl.MfaMethod.NONE,
                         "AUTHENTICATOR": UserTbl.MfaMethod.AUTHENTICATOR,
@@ -532,24 +531,26 @@ class RegisterAPIView(APIView):
                     user.mfa_method = mfa_map.get(normalized_method, user.mfa_method)
                     user.save(update_fields=["mfa_method", "updated_at"])
 
-                industry = self._resolve_reference_value(profile_payload.get("primary_industry") or profile_payload.get("industry"))
-                scope = self._resolve_scope_catalog(profile_payload.get("primary_scope") or profile_payload.get("scope"))
+                industry = self._resolve_reference_value(payload.get("primary_industry"))
+                scope = self._resolve_scope_catalog(payload.get("primary_scope"))
                 if not industry or not scope:
                     raise ValueError("Primary industry and primary scope are required.")
+
+                stage1_snapshot = {
+                    key: (value.name if hasattr(value, "name") else value)
+                    for key, value in payload.items()
+                    if key not in {"existing_resume", "profile_photo"}
+                }
 
                 application = RegistrationApplication.objects.create(
                     tenant=tenant,
                     user=user,
                     selected_industry=industry,
                     selected_scope=scope,
-                    selected_operating_country=(profile_payload.get("country_of_residence") or "")[:2],
+                    selected_operating_country=(payload.get("country_of_residence") or "")[:2],
                     status=RegistrationApplication.Status.SUBMITTED,
                     submitted_at=timezone.now(),
-                    stage1_snapshot={
-                        "account": account_payload,
-                        "profile": profile_payload,
-                        "consent": consent_payload,
-                    },
+                    stage1_snapshot=stage1_snapshot,
                 )
 
                 profile = ProfessionalProfile.objects.create(
@@ -558,7 +559,7 @@ class RegisterAPIView(APIView):
                     registration_application=application,
                     profile_status=ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE,
                 )
-                self._build_profile_payload(profile_payload, profile)
+                self._build_profile_payload(payload, profile)
                 profile.save()
 
                 consent_records = []
@@ -566,12 +567,12 @@ class RegisterAPIView(APIView):
                     "terms": ConsentRecord.ConsentType.TERMS,
                     "privacy": ConsentRecord.ConsentType.PRIVACY,
                     "resume_processing": ConsentRecord.ConsentType.RESUME_PROCESSING,
-                    "marketing": ConsentRecord.ConsentType.MARKETING,
+                    "marketing": ConsentRecord.ConsentType.MARKETING,                    
                 }
                 for input_key, consent_type in consent_map.items():
-                    if input_key not in consent_payload:
+                    if input_key not in payload:
                         continue
-                    granted = self._coerce_bool(consent_payload.get(input_key))
+                    granted = self._coerce_bool(payload.get(input_key))
                     consent_records.append(
                         ConsentRecord(
                             tenant=tenant,
@@ -579,7 +580,7 @@ class RegisterAPIView(APIView):
                             professional=profile,
                             consent_type=consent_type,
                             document_version="v1",
-                            jurisdiction=(profile_payload.get("country_of_residence") or "")[:2],
+                            jurisdiction=(payload.get("country_of_residence") or "")[:2],
                             is_granted=granted,
                             granted_at=timezone.now() if granted else None,
                             source=ConsentRecord.Source.WEB,
@@ -590,9 +591,12 @@ class RegisterAPIView(APIView):
 
                 resume_evidence = self._create_resume_evidence(tenant, profile, user, resume_file)
                 photo_evidence = self._create_profile_photo_evidence(tenant, profile, user, profile_photo_file)
+                if resume_evidence:
+                    profile.existing_resume = resume_evidence
                 if photo_evidence:
                     profile.profile_photo_evidence = photo_evidence
-                    profile.save(update_fields=["profile_photo_evidence", "updated_at"])
+                if resume_evidence or photo_evidence:
+                    profile.save(update_fields=[field for field in ["existing_resume", "profile_photo_evidence", "updated_at"] if getattr(profile, field) is not None])
 
                 return Response(
                     {
@@ -604,7 +608,7 @@ class RegisterAPIView(APIView):
                             "application_id": str(application.public_id),
                             "profile_id": str(profile.public_id),
                             "resume_evidence_document_id": str(resume_evidence.public_id) if resume_evidence else None,
-                            "photo_evidence_document_id": str(photo_evidence.public_id) if photo_evidence else None,                            
+                            "photo_evidence_document_id": str(photo_evidence.public_id) if photo_evidence else None,
                         },
                     },
                     status=status.HTTP_201_CREATED,
@@ -675,6 +679,59 @@ class LogoutAPIView(APIView):
         )
 
 
+
+
+class CheckUserExistsAPIView(APIView):
+    """Return whether a tenant+email combination already exists."""
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(request=CheckUserExistsRequestSerializer)
+    def post(self, request, *args, **kwargs):
+        serializer = CheckUserExistsRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        validated_data = serializer.validated_data
+        tenant_value = validated_data.get("tenant") or validated_data.get("tenant_id")
+        email = (validated_data.get("email") or "").strip().lower()
+
+        if not tenant_value or not email:
+            return Response(
+                {"success": False, "message": "tenant and email are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant = None
+        if tenant_value:
+            tenant_value = str(tenant_value).strip()
+            if tenant_value.isdigit():
+                tenant = Tenant.objects.filter(id=int(tenant_value)).first()
+            else:
+                tenant = (
+                    Tenant.objects.filter(public_id=tenant_value).first()
+                    or Tenant.objects.filter(portal_slug=tenant_value).first()
+                )
+
+        if tenant is None:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        exists = UserTbl.objects.filter(tenant=tenant, email__iexact=email).exists()
+        return Response(
+            {
+                "success": True,
+                "status": "exist" if exists else "new",
+                "tenant": str(tenant.public_id),
+                "email": email,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPRequestAPIView(APIView):

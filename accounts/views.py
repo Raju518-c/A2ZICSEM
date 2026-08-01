@@ -41,23 +41,35 @@ logger = logging.getLogger(__name__)
 
 
 def _deliver_otp(sent_to, raw_otp):
-    """Sends the OTP to an email address, or logs it when sent_to is a
-    mobile number (no SMS gateway is wired up in this project yet).
+    """Sends the OTP by email. Returns True if a real send was attempted,
+    False if sent_to is a mobile number — no SMS gateway is wired up in
+    this project yet, so the code is only logged (still usable for
+    development/testing, but never reaches a real phone).
     """
     if "@" not in sent_to:
         logger.info("OTP for %s: %s (SMS gateway not configured)", sent_to, raw_otp)
-        return
+        return False
 
-    send_mail(
-        subject="Your verification code",
-        message=(
-            f"Your verification code is {raw_otp}. It expires in "
-            f"{OTPVerification.OTP_TTL_MINUTES} minutes."
-        ),
-        from_email=None,
-        recipient_list=[sent_to],
-        fail_silently=True,
-    )
+    try:
+        send_mail(
+            subject="Your verification code",
+            message=(
+                f"Your verification code is {raw_otp}. It expires in "
+                f"{OTPVerification.OTP_TTL_MINUTES} minutes."
+            ),
+            from_email=None,
+            recipient_list=[sent_to],
+            fail_silently=False,
+        )
+    except Exception:
+        # Never surface delivery failures to the client (same response
+        # either way — the OTP row still exists and can be resent), but
+        # make sure they're visible in logs instead of silently dropped.
+        logger.exception("Failed to send OTP email to %s", sent_to)
+
+    return True
+
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserTblListCreateAPIView(APIView):
@@ -663,6 +675,8 @@ class LogoutAPIView(APIView):
         )
 
 
+
+
 class OTPRequestAPIView(APIView):
     """
     POST : Issue an OTP for otp_type in {EMAIL, MOBILE, LOGIN, PASSWORD_RESET}.
@@ -681,11 +695,9 @@ class OTPRequestAPIView(APIView):
         otp_type = serializer.validated_data["otp_type"]
         sent_to = serializer.validated_data.get("sent_to")
 
+        generic_message = "If the details are valid, a verification code has been sent."
         generic_response = Response(
-            {
-                "success": True,
-                "message": "If the details are valid, a verification code has been sent.",
-            },
+            {"success": True, "message": generic_message},
             status=status.HTTP_200_OK,
         )
 
@@ -707,8 +719,27 @@ class OTPRequestAPIView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        _deliver_otp(sent_to, raw_otp)
-        return generic_response
+        delivered_by_email = _deliver_otp(sent_to, raw_otp)
+        if delivered_by_email:
+            return generic_response
+
+        # sent_to was a mobile number: no SMS gateway exists yet, so no
+        # message actually reached the user. Say so instead of falsely
+        # claiming success on a channel that doesn't work — this only
+        # happens for MOBILE verification, or LOGIN when mfa_method=SMS,
+        # never PASSWORD_RESET (always emailed) or an anonymous request
+        # (both already returned above).
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Verification code generated, but SMS delivery is not "
+                    "available in this environment yet. Use email "
+                    "verification instead, or check server logs for the code."
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPVerifyAPIView(APIView):
@@ -741,8 +772,13 @@ class OTPVerifyAPIView(APIView):
                 # mutate. The registration endpoint is expected to check
                 # OTPVerification directly for (tenant, sent_to, otp_type,
                 # is_used=True) before creating the account.
+                message = (
+                    "Email verified."
+                    if otp_type == OTPVerification.OTPType.EMAIL
+                    else "Mobile number verified."
+                )
                 return Response(
-                    {"success": True, "message": "Verified."},
+                    {"success": True, "message": message},
                     status=status.HTTP_200_OK,
                 )
 
@@ -812,7 +848,6 @@ class OTPVerifyAPIView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
-
 
 
 

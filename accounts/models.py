@@ -653,6 +653,6 @@ class OTPVerification(models.Model):
         return django_check_password(raw_otp, self.otp)
 
     def __str__(self):
-        return f"{self.user} - {self.otp_type}"
+        return f"{self.sent_to} - {self.otp_type}"
 
 

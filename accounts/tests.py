@@ -1,14 +1,15 @@
 import json
+from unittest.mock import patch
 
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User as AuthUser
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
-from accounts.models import ConsentRecord, RegistrationApplication, UserTbl, roles
+from accounts.models import ConsentRecord, OTPVerification, RegistrationApplication, UserTbl, roles
 from accounts.views import RegisterAPIView
 from catalog.models import ReferenceValue, ScopeCatalog
 from evidence.models import EvidenceDocument
@@ -164,6 +165,45 @@ class LoginAPIViewTests(TestCase):
         self.assertTrue(consent_records.filter(consent_type="TERMS", is_granted=True).exists())
         self.assertTrue(consent_records.filter(consent_type="PRIVACY", is_granted=True).exists())
         self.assertTrue(consent_records.filter(consent_type="MARKETING", is_granted=False).exists())
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_otp_request_and_verify_with_tenant_id_and_email(self):
+        with patch("accounts.views._deliver_otp") as mock_deliver_otp:
+            response = self.client.post(
+                reverse("accounts:otp-request"),
+                {
+                    "tenant_id": str(self.tenant.public_id),
+                    "otp_type": "EMAIL",
+                    "email": "user@example.com",
+                },
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["success"])
+            self.assertTrue(mock_deliver_otp.called)
+            sent_to, raw_otp = mock_deliver_otp.call_args[0]
+            self.assertEqual(sent_to, "user@example.com")
+            self.assertEqual(len(raw_otp), 6)
+
+        response = self.client.post(
+            reverse("accounts:otp-verify"),
+            {
+                "tenant_id": str(self.tenant.public_id),
+                "otp_type": "EMAIL",
+                "email": "user@example.com",
+                "otp": raw_otp,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["message"], "Email verified successfully.")
+
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.email_verified_at)
 
     def test_register_saves_resume_to_evidence_document(self):
         industry = ReferenceValue.objects.create(

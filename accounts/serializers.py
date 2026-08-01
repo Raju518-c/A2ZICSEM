@@ -12,6 +12,7 @@ from accounts.models import (
     UserTbl,
     validate_mobile_number,
 )
+from core.validators import validate_calling_code
 from tenancy.models import Tenant
 
 
@@ -259,6 +260,12 @@ class OTPRequestSerializer(serializers.Serializer):
     """
 
     otp_type = serializers.ChoiceField(choices=OTPVerification.OTPType.choices)
+    tenant_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Tenant id, public_id, or portal slug.",
+    )
     tenant = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -305,11 +312,11 @@ class OTPRequestSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         otp_type = attrs["otp_type"]
-        tenant = _resolve_tenant(attrs.get("tenant"))
+        tenant = _resolve_tenant(attrs.get("tenant") or attrs.get("tenant_id"))
         email = (attrs.get("email") or "").strip().lower()
         new_value = (attrs.get("new_value") or "").strip()
         password = attrs.get("password") or ""
-        user = _resolve_user(attrs.get("tenant"), email)
+        user = _resolve_user(attrs.get("tenant") or attrs.get("tenant_id"), email)
 
         if otp_type == OTPVerification.OTPType.PASSWORD_RESET:
             # Do not reveal whether the account exists.
@@ -435,6 +442,12 @@ class OTPVerifySerializer(serializers.Serializer):
     """
 
     otp_type = serializers.ChoiceField(choices=OTPVerification.OTPType.choices)
+    tenant_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Tenant id, public_id, or portal slug.",
+    )
     tenant = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -468,10 +481,10 @@ class OTPVerifySerializer(serializers.Serializer):
 
     def validate(self, attrs):
         otp_type = attrs["otp_type"]
-        tenant = _resolve_tenant(attrs.get("tenant"))
+        tenant = _resolve_tenant(attrs.get("tenant") or attrs.get("tenant_id"))
         email = (attrs.get("email") or "").strip().lower()
         new_value = (attrs.get("new_value") or "").strip()
-        user = _resolve_user(attrs.get("tenant"), email)
+        user = _resolve_user(attrs.get("tenant") or attrs.get("tenant_id"), email)
         generic_error = {"otp": ["Invalid or expired code."]}
 
         if otp_type == OTPVerification.OTPType.LOGIN:

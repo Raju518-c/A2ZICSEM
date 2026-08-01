@@ -6,8 +6,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Tenant, TenantOperation
-from .serializers import TenantOperationSerializer, TenantSerializer
+from .models import *
+from .serializers import *
 
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantListCreateAPIView(APIView):
@@ -292,3 +292,156 @@ class TenantOperationRetrieveUpdateDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class OrganizationListCreateAPIView(APIView):
+    """
+    GET  : Get all organizations
+    POST : Create a new organization
+    """
+
+    def get(self, request):
+        organizations = Organization.objects.all().order_by(
+            "tenant",
+            "name"
+        )
+
+        serializer = OrganizationSerializer(
+            organizations,
+            many=True
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Organizations fetched successfully.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(request=OrganizationSerializer)
+    def post(self, request):
+        serializer = OrganizationSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Organization created successfully.",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        return Response(
+            {
+                "success": False,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+@method_decorator(csrf_exempt, name='dispatch')
+class OrganizationRetrieveUpdateDeleteAPIView(APIView):
+    """
+    GET    : Retrieve organization by ID
+    PUT    : Update organization
+    DELETE : Delete organization
+    """
+
+    def get_object(self, pk):
+        try:
+            return Organization.objects.get(pk=pk)
+        except Organization.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        organization = self.get_object(pk)
+
+        if not organization:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Organization not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = OrganizationSerializer(organization)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Organization retrieved successfully.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(request=OrganizationSerializer)
+    def put(self, request, pk):
+        organization = self.get_object(pk)
+
+        if not organization:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Organization not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = OrganizationSerializer(
+            organization,
+            data=request.data,
+            partial=True,
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Organization updated successfully.",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "success": False,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def delete(self, request, pk):
+        organization = self.get_object(pk)
+
+        if not organization:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Organization not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        organization.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": "Organization deleted successfully.",
+            },
+            status=status.HTTP_200_OK,
+        )
+        
+

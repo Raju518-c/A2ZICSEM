@@ -15,3 +15,13 @@ class TenantOperationSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class OrganizationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Organization
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+        )
+

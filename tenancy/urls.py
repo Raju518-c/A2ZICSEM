@@ -5,6 +5,8 @@ from .views import (
     TenantOperationListCreateAPIView,
     TenantOperationRetrieveUpdateDeleteAPIView,
     TenantRetrieveUpdateDeleteAPIView,
+    OrganizationListCreateAPIView,
+    OrganizationRetrieveUpdateDeleteAPIView,
 )
 
 app_name = "tenancy"
@@ -26,4 +28,16 @@ urlpatterns = [
         TenantOperationRetrieveUpdateDeleteAPIView.as_view(),
         name="tenant-operation-detail",
     ),
+
+    path(
+        "organizations/",
+        OrganizationListCreateAPIView.as_view(),
+        name="organization-list-create",
+    ),
+
+    path(
+        "organizations/<uuid:pk>/",
+        OrganizationRetrieveUpdateDeleteAPIView.as_view(),
+        name="organization-detail",
+    ),    
 ]

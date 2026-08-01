@@ -1,0 +1,38 @@
+"""Cross-application field-length and regex constants.
+
+Only values genuinely shared by more than one app live here. A constant
+used by exactly one app's models belongs in that app instead.
+"""
+
+CODE_MAX_LENGTH = 50
+NAME_MAX_LENGTH = 200
+STATUS_MAX_LENGTH = 30
+CHOICE_MAX_LENGTH = 20
+LABEL_MAX_LENGTH = 160
+
+EMAIL_MAX_LENGTH = 254
+PHONE_MAX_LENGTH = 20
+URL_MAX_LENGTH = 500
+
+COUNTRY_CODE_LENGTH = 2
+CURRENCY_CODE_LENGTH = 3
+IANA_TIMEZONE_MAX_LENGTH = 64
+
+STORAGE_KEY_MAX_LENGTH = 600
+FILE_HASH_MAX_LENGTH = 128
+
+REASON_MAX_LENGTH = 3000
+NOTES_MAX_LENGTH = 2000
+
+PERCENT_MAX_DIGITS = 5
+PERCENT_DECIMAL_PLACES = 2
+
+MONEY_MAX_DIGITS = 14
+MONEY_DECIMAL_PLACES = 2
+
+UPPERCASE_CODE_REGEX = r"^[A-Z0-9_]+$"
+LOWERCASE_SLUG_REGEX = r"^[a-z0-9-]+$"
+E164_PHONE_REGEX = r"^\+[1-9]\d{6,14}$"
+CALLING_CODE_REGEX = r"^\+[1-9]\d{0,3}$"
+ISO_ALPHA2_REGEX = r"^[A-Z]{2}$"
+ISO_CURRENCY_REGEX = r"^[A-Z]{3}$"

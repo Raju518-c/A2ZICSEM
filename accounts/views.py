@@ -336,7 +336,7 @@ class RegisterAPIView(APIView):
                 return False
         return bool(value)
     
-        def _get_or_create_resume_evidence_type(self, user):
+    def _get_or_create_resume_evidence_type(self, user):
         try:
             return ReferenceValue.objects.get(option_set="EVIDENCE_TYPE", code="RESUME")
         except ReferenceValue.DoesNotExist:
@@ -677,7 +677,7 @@ class OTPRequestAPIView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = serializer.validated_data.get("user")
+        tenant = serializer.validated_data.get("tenant")
         otp_type = serializer.validated_data["otp_type"]
         sent_to = serializer.validated_data.get("sent_to")
 
@@ -689,11 +689,14 @@ class OTPRequestAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-        if user is None:
+        # sent_to is None only for PASSWORD_RESET against a non-existent
+        # account (anti-enumeration); every other otp_type always has one,
+        # including pre-registration EMAIL/MOBILE with no account yet.
+        if sent_to is None:
             return generic_response
 
         try:
-            _, raw_otp = OTPVerification.issue(user=user, otp_type=otp_type, sent_to=sent_to)
+            _, raw_otp = OTPVerification.issue(tenant=tenant, otp_type=otp_type, sent_to=sent_to)
         except OTPCooldownError as exc:
             # PASSWORD_RESET keeps the generic response even on cooldown,
             # otherwise a 429 vs 200 becomes an account-existence oracle.
@@ -732,6 +735,16 @@ class OTPVerifyAPIView(APIView):
         with transaction.atomic():
             row.is_used = True
             row.save(update_fields=["is_used"])
+
+            if user is None:
+                # Pre-registration EMAIL/MOBILE: no account exists yet to
+                # mutate. The registration endpoint is expected to check
+                # OTPVerification directly for (tenant, sent_to, otp_type,
+                # is_used=True) before creating the account.
+                return Response(
+                    {"success": True, "message": "Verified."},
+                    status=status.HTTP_200_OK,
+                )
 
             if otp_type == OTPVerification.OTPType.EMAIL:
                 user.email = row.sent_to
@@ -799,3 +812,7 @@ class OTPVerifyAPIView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
+
+
+
+

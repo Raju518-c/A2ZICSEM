@@ -529,7 +529,6 @@ class ConsentRecord(CreatedOnlyModel):
     def __str__(self):
         return f"{self.user} — {self.consent_type}"
 
-
 class OTPCooldownError(Exception):
     """Raised by OTPVerification.issue() when a resend is requested before
     RESEND_COOLDOWN_SECONDS has elapsed since the last OTP of that type.
@@ -541,12 +540,15 @@ class OTPCooldownError(Exception):
 
 
 class OTPVerification(models.Model):
-    """One-time password issued for email/mobile verification, login MFA,
-    or password reset.
+    """One-time password issued for email/mobile verification (including
+    pre-registration, before any account exists), login MFA, or password
+    reset.
 
-    Key rules: OTP is stored hashed, never plain text. Tenant is reached
-    via user.tenant; not denormalized since OTPs are always looked up by
-    user, never listed per-tenant.
+    Key rules: OTP is stored hashed, never plain text. No user FK — an
+    account may not exist yet when this is issued (pre-registration
+    verification), so every row is matched by (tenant, sent_to, otp_type)
+    instead. tenant is NULL only for Platform Super Admin flows (LOGIN/
+    PASSWORD_RESET), mirroring UserTbl.tenant.
     """
 
     OTP_TTL_MINUTES = 10
@@ -559,10 +561,13 @@ class OTPVerification(models.Model):
         LOGIN = "LOGIN", "Login"
         PASSWORD_RESET = "PASSWORD_RESET", "Password Reset"
 
-    user = models.ForeignKey(
-        UserTbl,
+    tenant = models.ForeignKey(
+        "tenancy.Tenant",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="otp_verifications",
+        help_text="NULL only for Platform Super Admin LOGIN/PASSWORD_RESET.",
     )
     otp_type = models.CharField(
         max_length=30,
@@ -574,7 +579,8 @@ class OTPVerification(models.Model):
     )
     sent_to = models.CharField(
         max_length=254,
-        help_text="Actual destination address/number the OTP was sent to.",
+        help_text="Destination address/number; the matching key together "
+        "with tenant and otp_type.",
     )
     expires_at = models.DateTimeField()
     is_used = models.BooleanField(
@@ -595,8 +601,8 @@ class OTPVerification(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(
-                fields=["user", "otp_type", "is_used"],
-                name="idx_otp_user_type_used",
+                fields=["tenant", "sent_to", "otp_type", "is_used"],
+                name="idx_otp_tenant_sent_type",
             ),
             models.Index(
                 fields=["expires_at"],
@@ -611,16 +617,16 @@ class OTPVerification(models.Model):
         ]
 
     @classmethod
-    def issue(cls, *, user, otp_type, sent_to, ttl_minutes=None):
-        """Invalidate any pending OTP of this type for the user and issue
-        a new one, atomically. Returns (instance, raw_otp); raw_otp is
-        never stored. Raises OTPCooldownError if the last OTP of this
-        type was issued within RESEND_COOLDOWN_SECONDS.
+    def issue(cls, *, tenant, otp_type, sent_to, ttl_minutes=None):
+        """Invalidate any pending OTP of this type for (tenant, sent_to)
+        and issue a new one, atomically. Returns (instance, raw_otp);
+        raw_otp is never stored. Raises OTPCooldownError if the last OTP
+        for this destination was issued within RESEND_COOLDOWN_SECONDS.
         """
         with transaction.atomic():
             last = (
                 cls.objects.select_for_update()
-                .filter(user=user, otp_type=otp_type)
+                .filter(tenant=tenant, otp_type=otp_type, sent_to=sent_to)
                 .order_by("-created_at")
                 .first()
             )
@@ -630,10 +636,12 @@ class OTPVerification(models.Model):
                 if remaining > 0:
                     raise OTPCooldownError(int(remaining) + 1)
 
-            cls.objects.filter(user=user, otp_type=otp_type, is_used=False).update(is_used=True)
+            cls.objects.filter(
+                tenant=tenant, otp_type=otp_type, sent_to=sent_to, is_used=False
+            ).update(is_used=True)
             raw_otp = f"{secrets.randbelow(10 ** 6):06d}"
             instance = cls.objects.create(
-                user=user,
+                tenant=tenant,
                 otp_type=otp_type,
                 sent_to=sent_to,
                 otp=make_password(raw_otp),
@@ -646,3 +654,5 @@ class OTPVerification(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.otp_type}"
+
+

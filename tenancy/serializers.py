@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Tenant, TenantOperation
+from .models import *
 
 
 class TenantSerializer(serializers.ModelSerializer):

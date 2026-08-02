@@ -9,6 +9,7 @@ from .views import (
     OTPRequestAPIView,
     OTPVerifyAPIView,
     RegisterAPIView,
+    RegistrationApplicationDecisionAPIView,
     RegistrationApplicationListCreateAPIView,
     RegistrationApplicationRetrieveUpdateDeleteAPIView,
     UserTblListCreateAPIView,
@@ -28,6 +29,7 @@ urlpatterns = [
     path("users/<int:pk>/", UserTblRetrieveUpdateDeleteAPIView.as_view(), name="users-detail"),
     path("registration-applications/", RegistrationApplicationListCreateAPIView.as_view(), name="registration-applications-list-create"),
     path("registration-applications/<int:pk>/", RegistrationApplicationRetrieveUpdateDeleteAPIView.as_view(), name="registration-applications-detail"),
+    path("registration-applications/<int:pk>/decision/", RegistrationApplicationDecisionAPIView.as_view(), name="registration-applications-decision"),
     path("consent-records/", ConsentRecordListCreateAPIView.as_view(), name="consent-records-list-create"),
     path("consent-records/<int:pk>/", ConsentRecordRetrieveUpdateDeleteAPIView.as_view(), name="consent-records-detail"),
 ]

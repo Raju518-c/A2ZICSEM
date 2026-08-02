@@ -34,6 +34,7 @@ from .serializers import (
     OTPRequestSerializer,
     OTPVerifySerializer,
     RegisterRequestSerializer,
+    RegistrationApplicationDecisionSerializer,
     RegistrationApplicationSerializer,
     UserTblSerializer,
 )
@@ -201,6 +202,111 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "Registration application not found."}, status=status.HTTP_404_NOT_FOUND)
         application.delete()
         return Response({"success": True, "message": "Registration application deleted successfully."}, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RegistrationApplicationDecisionAPIView(APIView):
+    """
+    POST : Tenant Admin approves or rejects a submitted registration
+    application. Updates RegistrationApplication and the linked UserTbl
+    together, atomically, so the account only ever becomes active as a
+    direct result of an explicit approval decision.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = RegistrationApplicationDecisionSerializer
+
+    def _resolve_reviewer(self, value):
+        if not value:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        for lookup in ("public_id", "id"):
+            try:
+                return UserTbl.objects.get(**{lookup: value})
+            except (UserTbl.DoesNotExist, ValueError, ValidationError):
+                continue
+        return None
+
+    @extend_schema(request=RegistrationApplicationDecisionSerializer)
+    def post(self, request, pk):
+        try:
+            application = RegistrationApplication.objects.select_related("user").get(pk=pk)
+        except RegistrationApplication.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Registration application not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        decision = serializer.validated_data["decision"]
+        reason = serializer.validated_data.get("reason", "")
+        reviewed_by = self._resolve_reviewer(serializer.validated_data.get("reviewed_by"))
+
+        if application.status != RegistrationApplication.Status.SUBMITTED:
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Application is not pending review (status={application.status}).",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if decision == "REJECTED" and not reason:
+            return Response(
+                {"success": False, "message": "A reason is required to reject an application."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+        user = application.user
+
+        with transaction.atomic():
+            application.reviewed_by = reviewed_by
+            application.reviewed_at = now
+            application.decision_reason = reason
+
+            if decision == "APPROVED":
+                application.status = RegistrationApplication.Status.APPROVED
+                application.save(
+                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
+                )
+
+                user.approval_status = UserTbl.ApprovalStatus.APPROVED
+                user.approved_by = reviewed_by
+                user.approved_at = now
+                user.is_active = True
+                user.save(
+                    update_fields=["approval_status", "approved_by", "approved_at", "is_active", "updated_at"]
+                )
+            else:
+                application.status = RegistrationApplication.Status.REJECTED
+                application.save(
+                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
+                )
+
+                user.approval_status = UserTbl.ApprovalStatus.REJECTED
+                user.rejection_reason = reason
+                user.is_active = False
+                user.save(update_fields=["approval_status", "rejection_reason", "is_active", "updated_at"])
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Registration application {decision.lower()}.",
+                "data": {
+                    "application_id": str(application.public_id),
+                    "status": application.status,
+                    "user_id": str(user.public_id),
+                    "user_approval_status": user.approval_status,
+                    "user_is_active": user.is_active,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordListCreateAPIView(APIView):
@@ -511,9 +617,8 @@ class RegisterAPIView(APIView):
                     mobile_country_code=mobile_country_code,
                     mobile_number=mobile_number,
                     password=password,
-                    approval_status=UserTbl.ApprovalStatus.APPROVED,
-                    approved_at=timezone.now(),
-                    is_active=True,
+                    approval_status=UserTbl.ApprovalStatus.PENDING_APPROVAL,
+                    is_active=False,
                     is_candidate=False,
                     is_mentor=False,
                     referral_source=payload.get("referral_source") or None,
@@ -601,7 +706,7 @@ class RegisterAPIView(APIView):
                 return Response(
                     {
                         "success": True,
-                        "message": "Registration completed successfully.",
+                        "message": "Registration submitted successfully. Your account is pending Tenant Admin approval.",
                         "data": {
                             "tenant_id": str(tenant.public_id),
                             "user_id": str(user.public_id),

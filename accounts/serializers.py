@@ -163,6 +163,28 @@ class RegistrationApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ["public_id", "created_at", "updated_at"]
 
 
+class RegistrationApplicationDecisionSerializer(serializers.Serializer):
+    """Input for a Tenant Admin approving or rejecting a submitted
+    registration application. `reviewed_by` is payload-driven for now,
+    matching how the rest of this app resolves identity until real
+    authentication is wired up — swap it for request.user once that
+    lands.
+    """
+
+    decision = serializers.ChoiceField(choices=["APPROVED", "REJECTED"])
+    reviewed_by = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="UserTbl id or public_id of the reviewing Tenant Admin.",
+    )
+    reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Required when decision=REJECTED.",
+    )
+
+
 class ConsentRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConsentRecord

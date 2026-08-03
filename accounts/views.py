@@ -79,7 +79,8 @@ class UserTblListCreateAPIView(APIView):
     GET  : Get all users
     POST : Create a new user
     """
-
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         users = UserTbl.objects.all().order_by("email")
         serializer = UserTblSerializer(users, many=True)

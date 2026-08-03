@@ -124,35 +124,42 @@ class RegisterRequestSerializer(serializers.Serializer):
 
 
 class UserTblSerializer(serializers.ModelSerializer):
-    
-    # def to_internal_value(self, data):
-    #     allowed_fields = set(self.fields.keys())
 
-    #     filtered_data = {
-    #         key: value
-    #         for key, value in data.items()
-    #         if key in allowed_fields
-    #     }
-
-    #     return super().to_internal_value(filtered_data)
-    
     class Meta:
         model = UserTbl
         fields = "__all__"
-        read_only_fields = ["public_id", "date_joined", "updated_at", "last_login"]
+
+        read_only_fields = [
+            "public_id",
+            "date_joined",
+            "updated_at",
+            "last_login",
+        ]
+
+        extra_kwargs = {
+            "tenant": {
+                "required": False,
+                "allow_null": True,
+                "default": None,
+            }
+        }
 
     def create(self, validated_data):
         roles = validated_data.pop("role", [])
         user = super().create(validated_data)
+
         if roles:
             user.role.set(roles)
+
         return user
 
     def update(self, instance, validated_data):
         roles = validated_data.pop("role", None)
         user = super().update(instance, validated_data)
+
         if roles is not None:
             user.role.set(roles)
+
         return user
 
 

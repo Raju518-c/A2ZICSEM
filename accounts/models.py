@@ -249,7 +249,7 @@ class UserTbl(UUIDModel):
                     ~Q(approval_status="APPROVED") | Q(approved_at__isnull=False)
                 ),
                 name="chk_user_approved_at_required_when_approved",
-            ),
+            ), 
             models.CheckConstraint(
                 check=(
                     ~Q(approval_status="REJECTED") | ~Q(rejection_reason="")

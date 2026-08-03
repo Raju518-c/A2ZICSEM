@@ -1,7 +1,7 @@
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema
-from rest_framework import status
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from rest_framework import parsers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,160 +20,54 @@ class TenantCombinedCreateAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
-    @extend_schema(request=TenantSerializer)
+    @extend_schema(
+        request=TenantCombinedCreateSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="tenant",
+                description="JSON object containing tenant fields",
+                required=True,
+                type=dict,
+                location=OpenApiParameter.QUERY,
+            )
+        ],
+    )
     def post(self, request):
-        tenant_payload = request.data.get("tenant", request.data or {})
-        operations_payload = request.data.get("operations", [])
-        role_payload = request.data.get("role", {})
-        user_payload = request.data.get("user", {})
+        serializer = TenantCombinedCreateSerializer(data=request.data)
 
-        if not isinstance(tenant_payload, dict):
+        if not serializer.is_valid():
             return Response(
-                {"success": False, "errors": {"tenant": ["Tenant payload must be an object."]}},
+                {"success": False, "errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not isinstance(operations_payload, list):
-            operations_payload = [operations_payload] if operations_payload else []
+        created_data = serializer.save()
 
-        if not isinstance(role_payload, dict):
-            role_payload = {"code": str(role_payload)} if role_payload else {}
-
-        if not isinstance(user_payload, dict):
-            return Response(
-                {"success": False, "errors": {"user": ["User payload must be an object."]}},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not tenant_payload.get("name") or not tenant_payload.get("code") or not tenant_payload.get("portal_slug"):
-            return Response(
-                {
-                    "success": False,
-                    "errors": {
-                        "tenant": ["name, code and portal_slug are required."]
+        return Response(
+            {
+                "success": True,
+                "message": "Tenant, operations, role and admin user created successfully.",
+                "data": {
+                    "tenant": TenantSerializer(created_data["tenant"]).data,
+                    "operations": TenantOperationSerializer(
+                        created_data["operations"], many=True
+                    ).data,
+                    "role": {
+                        "code": created_data["role"].code,
+                        "name": created_data["role"].name,
+                        "roles_for": created_data["role"].roles_for,
+                    },
+                    "user": {
+                        "id": str(created_data["user"].public_id),
+                        "email": created_data["user"].email,
+                        "tenant_id": created_data["tenant"].pk,
                     },
                 },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user_email = (user_payload.get("email") or "").strip().lower()
-        user_mobile_country_code = user_payload.get("mobile_country_code")
-        user_mobile_number = user_payload.get("mobile_number")
-        password = user_payload.get("password")
-
-        if not user_email or not user_mobile_country_code or not user_mobile_number or not password:
-            return Response(
-                {
-                    "success": False,
-                    "errors": {
-                        "user": ["email, mobile_country_code, mobile_number and password are required."]
-                    },
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            with transaction.atomic():
-                admin_user = UserTbl.objects.create(
-                    email=user_email,
-                    mobile_country_code=user_mobile_country_code,
-                    mobile_number=user_mobile_number,
-                    password=password,
-                    approval_status=user_payload.get(
-                        "approval_status", UserTbl.ApprovalStatus.APPROVED
-                    ),
-                    is_active=user_payload.get("is_active", True),
-                    is_staff=user_payload.get("is_staff", True),
-                    is_superuser=user_payload.get("is_superuser", False),
-                )
-
-                tenant_data = dict(tenant_payload)
-                tenant_data["created_by"] = admin_user.pk
-
-                tenant_serializer = TenantSerializer(data=tenant_data)
-                if not tenant_serializer.is_valid():
-                    return Response(
-                        {"success": False, "errors": tenant_serializer.errors},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-                tenant = tenant_serializer.save()
-                admin_user.tenant = tenant
-                admin_user.save(update_fields=["tenant", "updated_at"])
-
-                role_code = role_payload.get("code") or user_payload.get("role") or "Admin"
-                role_name = role_payload.get("name") or role_code or "Admin"
-                role_for = (
-                    role_payload.get("roles_for")
-                    or user_payload.get("roles_for")
-                    or "tenant admin"
-                )
-
-                role_obj, _ = roles.objects.get_or_create(
-                    code=role_code,
-                    tenant=tenant,
-                    defaults={"name": role_name, "roles_for": role_for},
-                )
-                admin_user.role.add(role_obj)
-
-                created_operations = []
-                for operation_payload in operations_payload:
-                    if not isinstance(operation_payload, dict):
-                        continue
-
-                    operation_data = {
-                        "tenant": tenant.pk,
-                        "industry": operation_payload.get("industry")
-                        or operation_payload.get("industry_id"),
-                        "country_code": operation_payload.get("country_code"),
-                        "region_name": operation_payload.get("region_name", ""),
-                        "is_registration_enabled": operation_payload.get(
-                            "is_registration_enabled", True
-                        ),
-                        "is_active": operation_payload.get("is_active", True),
-                        "effective_from": operation_payload.get("effective_from"),
-                        "effective_to": operation_payload.get("effective_to"),
-                        "created_by": admin_user.pk,
-                    }
-
-                    operation_serializer = TenantOperationSerializer(data=operation_data)
-                    if not operation_serializer.is_valid():
-                        return Response(
-                            {"success": False, "errors": operation_serializer.errors},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
-                    created_operations.append(operation_serializer.save())
-
-                return Response(
-                    {
-                        "success": True,
-                        "message": "Tenant, operations, role and admin user created successfully.",
-                        "data": {
-                            "tenant": TenantSerializer(tenant).data,
-                            "operations": TenantOperationSerializer(
-                                created_operations, many=True
-                            ).data,
-                            "role": {
-                                "code": role_obj.code,
-                                "name": role_obj.name,
-                                "roles_for": role_obj.roles_for,
-                            },
-                            "user": {
-                                "id": str(admin_user.public_id),
-                                "email": admin_user.email,
-                                "tenant_id": tenant.pk,
-                            },
-                        },
-                    },
-                    status=status.HTTP_201_CREATED,
-                )
-        except Exception as exc:
-            return Response(
-                {"success": False, "errors": {"detail": str(exc)}},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            },
+            status=status.HTTP_201_CREATED,
+        )
             
 
 @method_decorator(csrf_exempt, name='dispatch')

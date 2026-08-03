@@ -36,6 +36,7 @@ from .serializers import (
     RegisterRequestSerializer,
     RegistrationApplicationDecisionSerializer,
     RegistrationApplicationSerializer,
+    RoleSerializer,
     UserTblSerializer,
 )
 
@@ -138,6 +139,77 @@ class UserTblRetrieveUpdateDeleteAPIView(APIView):
             return Response({"success": False, "message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         user.delete()
         return Response({"success": True, "message": "User deleted successfully."}, status=status.HTTP_200_OK)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RoleListCreateAPIView(APIView):
+    """
+    GET  : Get all roles
+    POST : Create a new role
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        roles_qs = roles.objects.all().order_by("code")
+        serializer = RoleSerializer(roles_qs, many=True)
+        return Response(
+            {"success": True, "message": "Roles fetched successfully.", "data": serializer.data},
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(request=RoleSerializer)
+    def post(self, request):
+        serializer = RoleSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {"success": True, "message": "Role created successfully.", "data": serializer.data},
+                status=status.HTTP_201_CREATED,
+            )
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RoleRetrieveUpdateDeleteAPIView(APIView):
+    """
+    GET    : Get role by ID
+    PUT    : Update role (partial)
+    DELETE : Delete role
+    """
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+        try:
+            return roles.objects.get(pk=pk)
+        except roles.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        role = self.get_object(pk)
+        if not role:
+            return Response({"success": False, "message": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = RoleSerializer(role)
+        return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
+
+    @extend_schema(request=RoleSerializer)
+    def put(self, request, pk):
+        role = self.get_object(pk)
+        if not role:
+            return Response({"success": False, "message": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = RoleSerializer(role, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"success": True, "message": "Role updated successfully.", "data": serializer.data}, status=status.HTTP_200_OK)
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        role = self.get_object(pk)
+        if not role:
+            return Response({"success": False, "message": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
+        role.delete()
+        return Response({"success": True, "message": "Role deleted successfully."}, status=status.HTTP_200_OK)
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class RegistrationApplicationListCreateAPIView(APIView):

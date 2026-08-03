@@ -10,6 +10,7 @@ from accounts.models import (
     OTPVerification,
     RegistrationApplication,
     UserTbl,
+    roles,
     validate_mobile_number,
 )
 from core.validators import validate_calling_code
@@ -161,6 +162,13 @@ class UserTblSerializer(serializers.ModelSerializer):
             user.role.set(roles)
 
         return user
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = roles
+        fields = "__all__"
+        read_only_fields = ["created"]
 
 
 class RegistrationApplicationSerializer(serializers.ModelSerializer):

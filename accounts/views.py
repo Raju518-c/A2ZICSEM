@@ -24,7 +24,7 @@ from accounts.models import (
 )
 from catalog.models import ReferenceValue, ScopeCatalog
 from professionals.models import ProfessionalProfile
-from tenancy.models import Tenant
+from tenancy.models import Tenant, TenantOperation
 
 from .serializers import (
     CheckUserExistsRequestSerializer,
@@ -604,6 +604,12 @@ class RegisterAPIView(APIView):
         if not tenant:
             return Response({"success": False, "message": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
 
+        if not tenant.registration_enabled:
+            return Response(
+                {"success": False, "message": "Registration is currently disabled for this tenant."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if UserTbl.objects.filter(tenant=tenant, email__iexact=email).exists():
             return Response(
                 {"success": False, "message": "A user with this email already exists for the tenant."},
@@ -641,6 +647,18 @@ class RegisterAPIView(APIView):
                 scope = self._resolve_scope_catalog(payload.get("primary_scope"))
                 if not industry or not scope:
                     raise ValueError("Primary industry and primary scope are required.")
+
+                country_code = (payload.get("country_of_residence") or "")[:2]
+                if not TenantOperation.objects.filter(
+                    tenant=tenant,
+                    industry=industry,
+                    country_code=country_code,
+                    is_registration_enabled=True,
+                    is_active=True,
+                ).exists():
+                    raise ValueError(
+                        "This tenant does not offer registration for the selected industry and country."
+                    )
 
                 stage1_snapshot = {
                     key: (value.name if hasattr(value, "name") else value)

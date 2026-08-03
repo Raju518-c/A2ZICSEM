@@ -40,19 +40,7 @@ def env_list(key, default=""):
 SECRET_KEY = env("DJANGO_SECRET_KEY", "insecure-development-key-change-me")
 # DEBUG = env_bool("DJANGO_DEBUG", False)
 DEBUG = True
-
-ALLOWED_HOSTS = [
-    "145.79.0.94",
-    "localhost",
-    "127.0.0.1",
-    "*",
-]
-
-CSRF_TRUSTED_ORIGINS = [
-    "http://145.79.0.94:82",
-    "http://localhost:3000",
-]
-
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 # ---------------------------------------------------------------------------
 # Applications

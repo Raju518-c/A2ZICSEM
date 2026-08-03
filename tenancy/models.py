@@ -13,7 +13,7 @@ from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import F, Q
 from django.utils.text import slugify
-
+from django.core.exceptions import ValidationError
 from core.models import TimeStampedModel, UUIDModel
 from core.validators import (
     MaxFileSizeValidator,
@@ -350,13 +350,17 @@ class Organization(UUIDModel, TimeStampedModel):
                 fields=["tenant", "code"],
                 condition=Q(code__isnull=False),
                 name="uniq_organization_tenant_code",
-            ),
-            models.CheckConstraint(
-                check=~Q(parent=F("id")),
-                name="chk_organization_parent_not_self",
-            ),
+            )           
         ]
 
+    def clean(self):
+        super().clean()
+
+        if self.parent_id and self.parent_id == self.id:
+            raise ValidationError({
+                "parent": "Organization cannot be its own parent."
+            })
+            
     def __str__(self):
         return self.name
 

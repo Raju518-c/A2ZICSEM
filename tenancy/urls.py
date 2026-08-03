@@ -7,11 +7,17 @@ from .views import (
     TenantRetrieveUpdateDeleteAPIView,
     OrganizationListCreateAPIView,
     OrganizationRetrieveUpdateDeleteAPIView,
+    TenantCombinedCreateAPIView,
 )
 
 app_name = "tenancy"
 
 urlpatterns = [
+    path(
+        "tenants/combined/",
+        TenantCombinedCreateAPIView.as_view(),
+        name="tenant-combined-create",
+    ),           
     path("tenants/", TenantListCreateAPIView.as_view(), name="tenant-list-create"),
     path(
         "tenants/<int:pk>/",

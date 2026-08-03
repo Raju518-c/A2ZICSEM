@@ -5,7 +5,7 @@ Ownership and access: Tenant Admin configures client-specific templates
 using approved source tokens. Professional and reviewer generate/approve
 outputs according to permissions.
 """
-
+from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
@@ -233,12 +233,16 @@ class ResumeGeneration(UUIDModel, TenantOwnedModel):
             models.CheckConstraint(
                 check=(~Q(status="SUBMITTED") | Q(submitted_at__isnull=False)),
                 name="chk_resume_generation_submitted_at_required",
-            ),
-            models.CheckConstraint(
-                check=~Q(supersedes=F("id")),
-                name="chk_resume_generation_supersedes_not_self",
-            ),
+            ),            
         ]
+        
+    def clean(self):
+        super().clean()
+
+        if self.supersedes_id and self.supersedes_id == self.id:
+            raise ValidationError({
+                "supersedes": "Resume generation cannot supersede itself."
+            })        
 
     def __str__(self):
         return f"{self.professional} — {self.resume_template} ({self.status})"

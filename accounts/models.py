@@ -17,7 +17,7 @@ from django.contrib.auth.hashers import (
     identify_hasher,
     make_password,
 )
-from django.core.exceptions import ValidationError
+
 import secrets
 
 from datetime import timedelta
@@ -239,11 +239,7 @@ class UserTbl(UUIDModel):
             models.UniqueConstraint(
                 fields=["tenant", "mobile_country_code", "mobile_number"],
                 name="uniq_user_tenant_mobile",
-            ),
-            models.CheckConstraint(
-                check=~Q(approved_by=F("id")),
-                name="chk_user_approved_by_not_self",
-            ),
+            ),            
             models.CheckConstraint(
                 check=(
                     ~Q(approval_status="APPROVED") | Q(approved_at__isnull=False)
@@ -261,6 +257,15 @@ class UserTbl(UUIDModel):
     # Plain properties (not inherited from AbstractBaseUser) required by
     # Django's check_user_model / auth machinery whenever AUTH_USER_MODEL
     # points at a model — must not be methods (see auth.C009/C010).
+    
+    def clean(self):
+        super().clean()
+
+        if self.approved_by_id and self.approved_by_id == self.id:
+            raise ValidationError({
+                "approved_by": "User cannot approve themselves."
+            })
+    
     @property
     def is_anonymous(self):
         return False

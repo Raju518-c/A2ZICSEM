@@ -1031,4 +1031,115 @@ class OTPVerifyAPIView(APIView):
             )
 
 
+from django_filters.rest_framework import DjangoFilterBackend
+
+from accounts.models import *
+from .serializers import *
+from .filters import *
+
+class UserListAPIView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    filterset_class = UserTblFilter
+
+    def get(self, request):
+        tenant_id = request.query_params.get("tenant_id")
+
+        queryset = (
+            UserTbl.objects
+            .select_related("tenant", "approved_by")
+            .prefetch_related("role")
+            .order_by("email")
+        )
+
+        if tenant_id:
+            queryset = queryset.filter(tenant_id=tenant_id)
+
+        filterset = self.filterset_class(
+            request.GET,
+            queryset=queryset
+        )
+
+        if not filterset.is_valid():
+            return Response(
+                {
+                    "success": False,
+                    "errors": filterset.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = UserTblSerializer(
+            filterset.qs,
+            many=True
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Users fetched successfully.",
+                "count": filterset.qs.count(),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+
+
+
+class Stage1DetailsAPIView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, user_id):
+
+        try:
+            user = (
+                UserTbl.objects
+                .select_related(
+                    "tenant",
+                    "professional_profile",
+                    "professional_profile__registration_application",
+                    "professional_profile__primary_industry",
+                    "professional_profile__primary_scope",
+                    "professional_profile__self_declared_career_stage",
+                    "professional_profile__highest_qualification_level",
+                    "professional_profile__primary_role",
+                    "professional_profile__availability_status",
+                    "professional_profile__rate_type",
+                    "professional_profile__existing_resume",
+                    "professional_profile__profile_photo_evidence",
+                )
+                .prefetch_related(
+                    "role",
+                    "consent_records",
+                    "registration_applications",
+                )
+                .get(id=user_id)
+            )
+
+        except UserTbl.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": "User not found."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = Stage1DetailsSerializer(user)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Stage 1 details fetched successfully.",
+                "data": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+        
+        
 

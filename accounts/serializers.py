@@ -584,3 +584,47 @@ class OTPVerifySerializer(serializers.Serializer):
         return attrs
 
 
+from accounts.models import UserTbl, ConsentRecord,RegistrationApplication
+from professionals.models import *
+from professionals.serializers import *
+
+
+
+class Stage1DetailsSerializer(serializers.Serializer):
+    user = serializers.SerializerMethodField()
+    registration_application = serializers.SerializerMethodField()
+    professional_profile = serializers.SerializerMethodField()
+    consent_records = serializers.SerializerMethodField()
+
+    def get_user(self, obj):
+        return UserTblSerializer(obj).data
+
+    def get_registration_application(self, obj):
+        profile = getattr(obj, "professional_profile", None)
+
+        if not profile or not profile.registration_application:
+            return None
+
+        return RegistrationApplicationSerializer(
+            profile.registration_application
+        ).data
+
+    def get_professional_profile(self, obj):
+        profile = getattr(obj, "professional_profile", None)
+
+        if not profile:
+            return None
+
+        return ProfessionalProfileSerializer(profile).data
+
+    def get_consent_records(self, obj):
+        consents = ConsentRecord.objects.filter(
+            user=obj
+        ).order_by("-created_at")
+
+        return ConsentRecordSerializer(
+            consents,
+            many=True
+        ).data
+        
+        

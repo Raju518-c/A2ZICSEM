@@ -12,10 +12,11 @@ shared by every tenant.
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
+from pydantic import ValidationError
 
 from core.choices import DataClassification, PublicationStatus, ResumeVisibility
 from core.models import CreatedOnlyModel, TimeStampedModel
-
+from django.core.exceptions import ValidationError
 
 class ReferenceValue(TimeStampedModel):
     """Single platform master for controlled values such as Industry,
@@ -65,6 +66,12 @@ class ReferenceValue(TimeStampedModel):
         related_name="reference_values_created",
         help_text="Creator; Platform Super Admin only.",
     )
+        
+    def clean(self):
+        if self.parent_id and self.parent_id == self.id:
+            raise ValidationError(
+                {"parent": "Parent cannot reference itself."}
+            )      
 
     class Meta:
         db_table = "catalog_reference_value"
@@ -74,11 +81,10 @@ class ReferenceValue(TimeStampedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["option_set", "code"], name="uniq_reference_value_option_set_code"
-            ),
-            models.CheckConstraint(
-                check=~Q(parent=F("id")), name="chk_reference_value_parent_not_self"
-            ),
+            ),            
         ]
+    
+  
 
     def __str__(self):
         return f"{self.option_set}:{self.code}"

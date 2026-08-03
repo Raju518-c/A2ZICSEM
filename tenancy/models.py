@@ -6,13 +6,17 @@ operations. Tenant Admin manages permitted organisation records within
 the tenant.
 """
 
+import os
+
 from django.conf import settings as django_settings
 from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import F, Q
+from django.utils.text import slugify
 
 from core.models import TimeStampedModel, UUIDModel
 from core.validators import (
+    MaxFileSizeValidator,
     validate_e164_phone,
     validate_iana_timezone,
     validate_iso_country_code,
@@ -20,6 +24,23 @@ from core.validators import (
     validate_lowercase_slug,
     validate_uppercase_code,
 )
+
+MAX_TENANT_LOGO_SIZE_BYTES = 10 * 1024 * 1024
+
+
+def tenant_logo_upload_path(instance, filename):
+    """
+    media/tenant_name/tenant_name_docs/filename
+    """
+
+    tenant_name = slugify(instance.name)
+    docs_folder = f"{tenant_name}_docs"
+
+    return os.path.join(
+        tenant_name,
+        docs_folder,
+        filename,
+    )
 
 
 class Tenant(UUIDModel, TimeStampedModel):
@@ -109,6 +130,14 @@ class Tenant(UUIDModel, TimeStampedModel):
         default=dict,
         blank=True,
         help_text="Tenant branding configuration (logo, colours, display settings).",
+    )
+    logo = models.ImageField(
+        upload_to=tenant_logo_upload_path,
+        max_length=1000,
+        null=True,
+        blank=True,
+        validators=[MaxFileSizeValidator(MAX_TENANT_LOGO_SIZE_BYTES)],
+        help_text="Tenant logo image. Max size 10MB.",
     )
     created_by = models.ForeignKey(
         "accounts.UserTbl",

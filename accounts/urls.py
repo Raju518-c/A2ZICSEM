@@ -14,6 +14,7 @@ from .views import (
     RegistrationApplicationRetrieveUpdateDeleteAPIView,
     UserTblListCreateAPIView,
     UserTblRetrieveUpdateDeleteAPIView,
+    UserListAPIView, Stage1DetailsAPIView,
 )
 
 app_name = "accounts"
@@ -32,4 +33,8 @@ urlpatterns = [
     path("registration-applications/<int:pk>/decision/", RegistrationApplicationDecisionAPIView.as_view(), name="registration-applications-decision"),
     path("consent-records/", ConsentRecordListCreateAPIView.as_view(), name="consent-records-list-create"),
     path("consent-records/<int:pk>/", ConsentRecordRetrieveUpdateDeleteAPIView.as_view(), name="consent-records-detail"),
+
+    path("users/tenants/", UserListAPIView.as_view(), name="user-list"),
+    path("stage1-details/user-id/<int:user_id>/",Stage1DetailsAPIView.as_view(),name="stage1-details"),
+
 ]

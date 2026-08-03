@@ -120,40 +120,22 @@ ASGI_APPLICATION = "config.asgi.application"
 # zero-setup local development option; switch with DATABASE_ENGINE in .env.
 # ---------------------------------------------------------------------------
 
-DATABASE_ENGINE = env("DATABASE_ENGINE", "sqlite").lower()
-
-# if DATABASE_ENGINE == "postgresql":
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": "django.db.backends.postgresql",
-#             "NAME": env("POSTGRES_DB", "a2z_icsem"),
-#             "USER": env("POSTGRES_USER", "a2z_icsem"),
-#             "PASSWORD": env("POSTGRES_PASSWORD", "postgresql"),
-#             "HOST": env("POSTGRES_HOST", "localhost"),
-#             "PORT": env("POSTGRES_PORT", "5432"),
-#             "CONN_MAX_AGE": 60,
-#         }
-#     }
-# elif DATABASE_ENGINE == "sqlite":
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": "django.db.backends.sqlite3",
-#             "NAME": BASE_DIR / env("SQLITE_NAME", "db.sqlite3"),
-#         }
-#     }
-# else:
-#     raise ImproperlyConfigured(
-#         f"Unsupported DATABASE_ENGINE '{DATABASE_ENGINE}'. Use 'sqlite' or 'postgresql'."
-#     )
-
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / env("SQLITE_NAME", "db.sqlite3"),
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": "a2znewpython",
+        "USER": "root",
+        "PASSWORD": "Root@1234",
+        "HOST": "localhost",
+        "PORT": "3306",
+        "OPTIONS": {
+            "charset": "utf8mb4",
+        },
     }
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
 
 # ---------------------------------------------------------------------------
 # Auth

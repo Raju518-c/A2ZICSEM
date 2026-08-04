@@ -14,6 +14,8 @@ from accounts.models import (
     validate_mobile_number,
 )
 from core.validators import validate_calling_code
+from evidence.serializers import EvidenceDocumentSerializer
+from professionals.serializers import ProfessionalProfileSerializer
 from tenancy.models import Tenant
 
 
@@ -692,4 +694,31 @@ class Stage1DetailsSerializer(serializers.Serializer):
             many=True
         ).data
         
+class UserTblDetailSerializer(serializers.ModelSerializer):
+    registration_applications = RegistrationApplicationSerializer(
+        many=True,
+        read_only=True,
+    )
+    consent_records = ConsentRecordSerializer(many=True, read_only=True)
+    professional_profile = ProfessionalProfileSerializer(read_only=True)
+    evidence_documents = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserTbl
+        fields = "__all__"
+        read_only_fields = [
+            "public_id",
+            "date_joined",
+            "updated_at",
+            "last_login",
+        ]
+
+    def get_evidence_documents(self, obj):
+        profile = getattr(obj, "professional_profile", None)
+        if not profile:
+            return []
+
+        documents = profile.evidence_documents.all()
+        return EvidenceDocumentSerializer(documents, many=True).data
+
         

@@ -98,6 +98,7 @@ class UserTbl(UUIDModel):
     class ApprovalStatus(models.TextChoices):
         PENDING_APPROVAL = "PENDING_APPROVAL", "Pending approval"
         APPROVED = "APPROVED", "Approved"
+        RETURNED = "RETURNED", "Returned"
         REJECTED = "REJECTED", "Rejected"
         SUSPENDED = "SUSPENDED", "Suspended"
 
@@ -327,7 +328,6 @@ class RegistrationApplication(TimeStampedModel, UUIDModel):
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
         RETURNED = "RETURNED", "Returned"
-        CANCELLED = "CANCELLED", "Cancelled"
 
     tenant = models.ForeignKey(
         "tenancy.Tenant",

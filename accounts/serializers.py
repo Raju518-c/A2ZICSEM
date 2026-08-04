@@ -142,7 +142,10 @@ class UserTblSerializer(serializers.ModelSerializer):
                 "required": False,
                 "allow_null": True,
                 "default": None,
-            }
+            },
+            "password": {
+                "write_only": True,
+            },
         }
 
     def create(self, validated_data):
@@ -198,6 +201,51 @@ class RegistrationApplicationDecisionSerializer(serializers.Serializer):
         allow_blank=True,
         help_text="Required when decision=REJECTED.",
     )
+
+
+class RegistrationApplicationResubmitSerializer(serializers.Serializer):
+    """Editable Stage 1 fields for the edit/resubmit flow — everything
+    RegisterRequestSerializer accepts except password, which stays on the
+    PASSWORD_RESET OTP flow (verifies account control before applying;
+    this endpoint currently has no caller-identity check at all, so it
+    must not be able to change how someone logs in).
+
+    All fields are optional: only the ones actually being changed need to
+    be sent. Consent fields (terms/privacy/resume_processing/marketing)
+    are intentionally NOT given a default — omitted means "unchanged",
+    not "revoked". Each one sent creates a new ConsentRecord row
+    (append-only, matching the model's documented history semantics;
+    never overwrites a prior consent record).
+    """
+
+    email = serializers.EmailField(required=False, allow_blank=True)
+    mobile_country_code = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+    mfa_method = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    referral_source = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    referral_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    middle_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    preferred_name = serializers.CharField(required=False, allow_blank=True)
+    name_display_order = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    country_of_residence = serializers.CharField(required=False, allow_blank=True)
+    city = serializers.CharField(required=False, allow_blank=True)
+    time_zone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    primary_industry = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    primary_scope = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    self_declared_career_stage = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    current_job_title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    initial_experience_band = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    highest_qualification_level = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    existing_resume = serializers.FileField(required=False, allow_null=True, write_only=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True, write_only=True)
+
+    terms = serializers.BooleanField(required=False)
+    privacy = serializers.BooleanField(required=False)
+    resume_processing = serializers.BooleanField(required=False)
+    marketing = serializers.BooleanField(required=False)
 
 
 class ConsentRecordSerializer(serializers.ModelSerializer):
@@ -274,14 +322,20 @@ class LoginSerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError({"email": ["Invalid credentials."]})        
 
+        # PENDING_APPROVAL and APPROVED may both log in (Stage 1
+        # SUBMITTED/RETURNED/APPROVED and all of Stage 2, per the approval
+        # state machine) — only REJECTED and SUSPENDED are blocked.
+        if user.approval_status in (
+            UserTbl.ApprovalStatus.REJECTED,
+            UserTbl.ApprovalStatus.SUSPENDED,
+        ):
+            raise serializers.ValidationError(
+                {"email": ["This account is not allowed to login."]}
+            )
+
         if not user.is_active:
             raise serializers.ValidationError({"email": ["This account is inactive."]})
 
-        if user.approval_status != UserTbl.ApprovalStatus.APPROVED:
-            raise serializers.ValidationError(
-                {"email": ["This account is not approved for login."]}
-            )
-            
         if not user.check_password(password):
                     raise serializers.ValidationError({"password": ["Invalid credentials."]})
 
@@ -373,12 +427,15 @@ class OTPRequestSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"email": ["No matching account found."]})
             if not password:
                 raise serializers.ValidationError({"password": ["Password is required."]})
+            if user.approval_status in (
+                UserTbl.ApprovalStatus.REJECTED,
+                UserTbl.ApprovalStatus.SUSPENDED,
+            ):
+                raise serializers.ValidationError(
+                    {"email": ["This account is not allowed to login."]}
+                )
             if not user.is_active:
                 raise serializers.ValidationError({"email": ["This account is inactive."]})
-            if user.approval_status != UserTbl.ApprovalStatus.APPROVED:
-                raise serializers.ValidationError(
-                    {"email": ["This account is not approved for login."]}
-                )
             if not user.check_password(password):
                 raise serializers.ValidationError({"password": ["Invalid credentials."]})
             if user.mfa_method == UserTbl.MfaMethod.NONE:

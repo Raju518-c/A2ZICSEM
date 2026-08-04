@@ -11,12 +11,13 @@ from .views import (
     RegisterAPIView,
     RegistrationApplicationDecisionAPIView,
     RegistrationApplicationListCreateAPIView,
+    RegistrationApplicationResubmitAPIView,
     RegistrationApplicationRetrieveUpdateDeleteAPIView,
     RoleListCreateAPIView,
     RoleRetrieveUpdateDeleteAPIView,
     UserTblListCreateAPIView,
     UserTblRetrieveUpdateDeleteAPIView,
-    UserListAPIView, Stage1DetailsAPIView,
+    UserListAPIView, Stage1DetailsAPIView, RegistrationStatusAPIView,
 )
 
 app_name = "accounts"
@@ -35,10 +36,12 @@ urlpatterns = [
     path("roles/", RoleListCreateAPIView.as_view(), name="roles-list-create"),
     path("roles/<int:pk>/", RoleRetrieveUpdateDeleteAPIView.as_view(), name="roles-detail"),
     path("registration-applications/<int:pk>/decision/", RegistrationApplicationDecisionAPIView.as_view(), name="registration-applications-decision"),
+    path("registration-applications/<int:pk>/resubmit/", RegistrationApplicationResubmitAPIView.as_view(), name="registration-applications-resubmit"),
     path("consent-records/", ConsentRecordListCreateAPIView.as_view(), name="consent-records-list-create"),
     path("consent-records/<int:pk>/", ConsentRecordRetrieveUpdateDeleteAPIView.as_view(), name="consent-records-detail"),
 
     path("users/tenants/", UserListAPIView.as_view(), name="user-list"),
     path("stage1-details/user-id/<int:user_id>/",Stage1DetailsAPIView.as_view(),name="stage1-details"),
+    path("registration-status/user-id/<int:user_id>/", RegistrationStatusAPIView.as_view(), name="registration-status"),
 
 ]

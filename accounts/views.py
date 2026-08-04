@@ -35,6 +35,7 @@ from .serializers import (
     OTPVerifySerializer,
     RegisterRequestSerializer,
     RegistrationApplicationDecisionSerializer,
+    RegistrationApplicationResubmitSerializer,
     RegistrationApplicationSerializer,
     RoleSerializer,
     UserTblSerializer,
@@ -281,9 +282,15 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
 class RegistrationApplicationDecisionAPIView(APIView):
     """
     POST : Tenant Admin approves or rejects a submitted registration
-    application. Updates RegistrationApplication and the linked UserTbl
-    together, atomically, so the account only ever becomes active as a
-    direct result of an explicit approval decision.
+    application (Stage 1 only).
+
+    Approving only unlocks Stage 2 — RegistrationApplication.status becomes
+    APPROVED, but UserTbl.approval_status intentionally stays
+    PENDING_APPROVAL; the account is only fully APPROVED once Stage 2 is
+    also approved (separate, not-yet-built decision on the Stage 2 side).
+
+    Rejecting is terminal for the whole account: UserTbl.approval_status
+    becomes REJECTED and is_active is set False, blocking login.
     """
 
     permission_classes = [AllowAny]
@@ -346,14 +353,9 @@ class RegistrationApplicationDecisionAPIView(APIView):
                 application.save(
                     update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
                 )
-
-                user.approval_status = UserTbl.ApprovalStatus.APPROVED
-                user.approved_by = reviewed_by
-                user.approved_at = now
-                user.is_active = True
-                user.save(
-                    update_fields=["approval_status", "approved_by", "approved_at", "is_active", "updated_at"]
-                )
+                # UserTbl is intentionally left untouched here — see class
+                # docstring. Stage 1 approval unlocks Stage 2; it does not
+                # approve the account.
             else:
                 application.status = RegistrationApplication.Status.REJECTED
                 application.save(
@@ -375,6 +377,241 @@ class RegistrationApplicationDecisionAPIView(APIView):
                     "user_id": str(user.public_id),
                     "user_approval_status": user.approval_status,
                     "user_is_active": user.is_active,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RegistrationApplicationResubmitAPIView(APIView):
+    """
+    POST : Edit and resubmit a Stage 1 registration application.
+
+    Allowed only while status is SUBMITTED or RETURNED (blocked once
+    APPROVED/REJECTED). Mutates the same RegistrationApplication row in
+    place: application_version is incremented, status is reset to
+    SUBMITTED, submitted_at is refreshed, and any prior review decision
+    (reviewed_by/reviewed_at/decision_reason) is cleared since it no
+    longer applies to the updated content. UserTbl
+    (email/mobile/mfa_method/referral_*) and the linked
+    ProfessionalProfile's Stage 1 fields are updated in place too.
+    Changing email or mobile clears its verified_at timestamp, so it must
+    be re-verified via /otp-request/ + /otp-verify/ before Stage 2.
+    Password is intentionally not editable here — see
+    RegistrationApplicationResubmitSerializer's docstring. Any consent
+    fields sent create new ConsentRecord rows (append-only). A new resume
+    or profile photo creates new EvidenceDocument rows the same way
+    RegisterAPIView does. Ends the session on success ("On Submit/Resubmit
+    → logout").
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = RegistrationApplicationResubmitSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, pk):
+        try:
+            application = RegistrationApplication.objects.select_related("user", "tenant").get(pk=pk)
+        except RegistrationApplication.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Registration application not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if application.status not in (
+            RegistrationApplication.Status.SUBMITTED,
+            RegistrationApplication.Status.RETURNED,
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Cannot edit an application with status={application.status}.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        tenant = application.tenant
+        user = application.user
+        # RegisterAPIView's resolver/mapper helpers are pure (no use of
+        # self.request/kwargs), so a bare instance safely reuses them here
+        # instead of duplicating the same lookup and field-mapping logic.
+        helper = RegisterAPIView()
+
+        new_email = (payload.get("email") or "").strip().lower()
+        new_mobile_country_code = (payload.get("mobile_country_code") or "").strip()
+        new_mobile_number = (payload.get("mobile_number") or "").strip()
+
+        email_changed = bool(new_email) and new_email != user.email
+        mobile_changed = bool(new_mobile_number) and (
+            new_mobile_number != user.mobile_number
+            or (new_mobile_country_code and new_mobile_country_code != user.mobile_country_code)
+        )
+
+        if email_changed and UserTbl.objects.filter(
+            tenant=tenant, email__iexact=new_email
+        ).exclude(pk=user.pk).exists():
+            return Response(
+                {"success": False, "message": "A user with this email already exists for the tenant."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if mobile_changed:
+            effective_country_code = new_mobile_country_code or user.mobile_country_code
+            if UserTbl.objects.filter(
+                tenant=tenant,
+                mobile_country_code=effective_country_code,
+                mobile_number=new_mobile_number,
+            ).exclude(pk=user.pk).exists():
+                return Response(
+                    {"success": False, "message": "A user with this mobile number already exists for the tenant."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        industry = helper._resolve_reference_value(payload.get("primary_industry")) or application.selected_industry
+        scope = helper._resolve_scope_catalog(payload.get("primary_scope")) or application.selected_scope
+        country_code = (payload.get("country_of_residence") or "")[:2] or application.selected_operating_country
+
+        if not TenantOperation.objects.filter(
+            tenant=tenant,
+            industry=industry,
+            country_code=country_code,
+            is_registration_enabled=True,
+            is_active=True,
+        ).exists():
+            return Response(
+                {
+                    "success": False,
+                    "message": "This tenant does not offer registration for the selected industry and country.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resume_file = payload.get("existing_resume")
+        profile_photo_file = payload.get("profile_photo")
+
+        with transaction.atomic():
+            update_fields = ["updated_at"]
+            if email_changed:
+                user.email = new_email
+                user.email_verified_at = None
+                update_fields += ["email", "email_verified_at"]
+            if mobile_changed:
+                if new_mobile_country_code:
+                    user.mobile_country_code = new_mobile_country_code
+                user.mobile_number = new_mobile_number
+                user.mobile_verified_at = None
+                update_fields += ["mobile_country_code", "mobile_number", "mobile_verified_at"]
+            if payload.get("mfa_method"):
+                mfa_map = {
+                    "NONE": UserTbl.MfaMethod.NONE,
+                    "AUTHENTICATOR": UserTbl.MfaMethod.AUTHENTICATOR,
+                    "SMS": UserTbl.MfaMethod.SMS,
+                    "EMAIL": UserTbl.MfaMethod.EMAIL,
+                }
+                new_mfa_method = mfa_map.get(str(payload["mfa_method"]).upper())
+                if new_mfa_method:
+                    user.mfa_method = new_mfa_method
+                    update_fields.append("mfa_method")
+            if "referral_source" in payload:
+                user.referral_source = payload.get("referral_source") or None
+                update_fields.append("referral_source")
+            if "referral_code" in payload:
+                user.referral_code = payload.get("referral_code") or None
+                update_fields.append("referral_code")
+            if len(update_fields) > 1:
+                user.save(update_fields=update_fields)
+
+            profile = ProfessionalProfile.objects.filter(user=user, tenant=tenant).first()
+            if profile:
+                helper._build_profile_payload(payload, profile)
+                profile.save()
+
+            application.application_version += 1
+            application.selected_industry = industry
+            application.selected_scope = scope
+            application.selected_operating_country = country_code
+            application.status = RegistrationApplication.Status.SUBMITTED
+            application.submitted_at = timezone.now()
+            # Clear the prior review decision — it was made against the
+            # content this resubmit just replaced, so it no longer applies.
+            application.reviewed_by = None
+            application.reviewed_at = None
+            application.decision_reason = ""
+            application.stage1_snapshot = {
+                key: (value.name if hasattr(value, "name") else value)
+                for key, value in payload.items()
+                if key not in {"existing_resume", "profile_photo"}
+            }
+            application.save(
+                update_fields=[
+                    "application_version",
+                    "selected_industry",
+                    "selected_scope",
+                    "selected_operating_country",
+                    "status",
+                    "submitted_at",
+                    "reviewed_by",
+                    "reviewed_at",
+                    "decision_reason",
+                    "stage1_snapshot",
+                    "updated_at",
+                ]
+            )
+
+            consent_records = []
+            consent_map = {
+                "terms": ConsentRecord.ConsentType.TERMS,
+                "privacy": ConsentRecord.ConsentType.PRIVACY,
+                "resume_processing": ConsentRecord.ConsentType.RESUME_PROCESSING,
+                "marketing": ConsentRecord.ConsentType.MARKETING,
+            }
+            for input_key, consent_type in consent_map.items():
+                if input_key not in payload:
+                    continue
+                granted = bool(payload.get(input_key))
+                consent_records.append(
+                    ConsentRecord(
+                        tenant=tenant,
+                        user=user,
+                        professional=profile,
+                        consent_type=consent_type,
+                        document_version="v1",
+                        is_granted=granted,
+                        granted_at=timezone.now() if granted else None,
+                        source=ConsentRecord.Source.WEB,
+                    )
+                )
+            if consent_records:
+                ConsentRecord.objects.bulk_create(consent_records)
+
+            resume_evidence = None
+            photo_evidence = None
+            if profile:
+                resume_evidence = helper._create_resume_evidence(tenant, profile, user, resume_file)
+                photo_evidence = helper._create_profile_photo_evidence(tenant, profile, user, profile_photo_file)
+                if photo_evidence:
+                    profile.profile_photo_evidence = photo_evidence
+                    profile.save(update_fields=["profile_photo_evidence", "updated_at"])
+
+        request.session.flush()
+
+        return Response(
+            {
+                "success": True,
+                "message": "Registration resubmitted successfully.",
+                "data": {
+                    "application_id": str(application.public_id),
+                    "application_version": application.application_version,
+                    "status": application.status,
+                    "resume_evidence_document_id": str(resume_evidence.public_id) if resume_evidence else None,
+                    "photo_evidence_document_id": str(photo_evidence.public_id) if photo_evidence else None,
+                    "email_reverification_required": email_changed,
+                    "mobile_reverification_required": mobile_changed,
                 },
             },
             status=status.HTTP_200_OK,
@@ -697,7 +934,7 @@ class RegisterAPIView(APIView):
                     mobile_number=mobile_number,
                     password=password,
                     approval_status=UserTbl.ApprovalStatus.PENDING_APPROVAL,
-                    is_active=False,
+                    is_active=True,
                     is_candidate=False,
                     is_mentor=False,
                     referral_source=payload.get("referral_source") or None,
@@ -1212,6 +1449,79 @@ class Stage1DetailsAPIView(APIView):
             },
             status=status.HTTP_200_OK
         )
-        
-        
+
+
+class RegistrationStatusAPIView(APIView):
+    """
+    GET : Lightweight status summary for a user — the 3 raw status fields
+    the frontend needs to check (per the approval state machine), plus a
+    derived current_stage label so the frontend doesn't have to
+    reimplement that derivation itself.
+
+    Unlike Stage1DetailsAPIView, this returns only status fields, not full
+    table contents.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def _compute_current_stage(self, user_approval_status, application_status, profile_status):
+        if user_approval_status == UserTbl.ApprovalStatus.REJECTED:
+            return "REJECTED"
+        if user_approval_status == UserTbl.ApprovalStatus.SUSPENDED:
+            return "SUSPENDED"
+        if user_approval_status == UserTbl.ApprovalStatus.APPROVED:
+            # UserTbl only reaches APPROVED once Stage 2 is also approved —
+            # see RegistrationApplicationDecisionAPIView's docstring.
+            return "COMPLETED"
+
+        # user_approval_status == PENDING_APPROVAL from here on: Stage 1 or
+        # Stage 2 is still in progress.
+        if application_status in (
+            RegistrationApplication.Status.SUBMITTED,
+            RegistrationApplication.Status.RETURNED,
+            None,
+        ):
+            return "STAGE_1"
+        if application_status == RegistrationApplication.Status.APPROVED:
+            return "STAGE_2"
+
+        # Defensive fallback — shouldn't be reachable given the states above.
+        return "STAGE_1"
+
+    def get(self, request, user_id):
+        try:
+            user = UserTbl.objects.select_related(
+                "professional_profile",
+                "professional_profile__registration_application",
+            ).get(id=user_id)
+        except UserTbl.DoesNotExist:
+            return Response(
+                {"success": False, "message": "User not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        profile = getattr(user, "professional_profile", None)
+        application = profile.registration_application if profile else None
+
+        user_approval_status = user.approval_status
+        application_status = application.status if application else None
+        profile_status = profile.profile_status if profile else None
+
+        return Response(
+            {
+                "success": True,
+                "message": "Registration status fetched successfully.",
+                "data": {
+                    "user_approval_status": user_approval_status,
+                    "registration_application_status": application_status,
+                    "professional_profile_status": profile_status,
+                    "current_stage": self._compute_current_stage(
+                        user_approval_status, application_status, profile_status
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
 

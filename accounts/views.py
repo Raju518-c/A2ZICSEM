@@ -21,6 +21,7 @@ from accounts.models import (
     OTPVerification,
     RegistrationApplication,
     UserTbl,
+    roles,
 )
 from catalog.models import ReferenceValue, ScopeCatalog
 from professionals.models import ProfessionalProfile
@@ -37,6 +38,7 @@ from .serializers import (
     RegistrationApplicationDecisionSerializer,
     RegistrationApplicationSerializer,
     RoleSerializer,
+    UserTblDetailSerializer,
     UserTblSerializer,
 )
 
@@ -73,6 +75,64 @@ def _deliver_otp(sent_to, raw_otp):
     return True
 
 
+def _extract_request_value(request, keys):
+    sources = []
+    if hasattr(request, "data"):
+        sources.append(request.data)
+    if hasattr(request, "query_params"):
+        sources.append(request.query_params)
+    if hasattr(request, "GET"):
+        sources.append(request.GET)
+    if hasattr(request, "POST"):
+        sources.append(request.POST)
+
+    for source in sources:
+        if not source:
+            continue
+
+        if isinstance(source, dict):
+            payload = source
+        elif hasattr(source, "dict"):
+            payload = source.dict()
+        else:
+            payload = dict(source)
+
+        for key in keys:
+            if key not in payload:
+                continue
+
+            value = payload.get(key)
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    continue
+                try:
+                    return int(value)
+                except ValueError:
+                    return value
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return value
+
+    return None
+
+
+def _extract_tenant_id_from_request(request):
+    value = _extract_request_value(request, ("tenant_id", "tenant", "tenantId"))
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return value
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserTblListCreateAPIView(APIView):
@@ -83,8 +143,21 @@ class UserTblListCreateAPIView(APIView):
     permission_classes = [AllowAny]
     
     def get(self, request):
-        users = UserTbl.objects.all().order_by("email")
-        serializer = UserTblSerializer(users, many=True)
+        tenant_id = _extract_tenant_id_from_request(request)
+        request_type = _extract_request_value(request, ("type", "user_type"))
+        queryset = UserTbl.objects.all().order_by("email")
+
+        if tenant_id is not None:
+            queryset = queryset.filter(tenant_id=tenant_id)
+
+        if tenant_id is not None and isinstance(request_type, str):
+            request_type = request_type.strip().lower()
+            if request_type == "general":
+                queryset = queryset.filter(role__isnull=True)
+            elif request_type == "tenant":
+                queryset = queryset.filter(role__tenant_id=tenant_id).distinct()
+
+        serializer = UserTblSerializer(queryset, many=True)
         return Response(
             {"success": True, "message": "Users fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
@@ -120,7 +193,7 @@ class UserTblRetrieveUpdateDeleteAPIView(APIView):
         user = self.get_object(pk)
         if not user:
             return Response({"success": False, "message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-        serializer = UserTblSerializer(user)
+        serializer = UserTblDetailSerializer(user)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
     
     @extend_schema(request=UserTblSerializer)
@@ -151,8 +224,13 @@ class RoleListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        roles_qs = roles.objects.all().order_by("code")
-        serializer = RoleSerializer(roles_qs, many=True)
+        tenant_id = _extract_tenant_id_from_request(request)
+        queryset = roles.objects.all().order_by("code")
+
+        if tenant_id is not None:
+            queryset = queryset.filter(tenant_id=tenant_id)
+
+        serializer = RoleSerializer(queryset, many=True)
         return Response(
             {"success": True, "message": "Roles fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,

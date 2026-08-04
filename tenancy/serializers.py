@@ -1,3 +1,5 @@
+import json
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -8,6 +10,7 @@ from .models import *
 
 
 class TenantSerializer(serializers.ModelSerializer):
+    logo = serializers.ImageField(required=False, allow_null=True, style={"base_template": "file.html"})
     class Meta:
         model = Tenant
         fields = "__all__"
@@ -34,7 +37,7 @@ class TenantCreateInputSerializer(serializers.Serializer):
     contact_phone = serializers.CharField(required=False, allow_blank=True)
     settings = serializers.JSONField(required=False, default=dict)
     branding = serializers.JSONField(required=False, default=dict)
-    logo = serializers.ImageField(required=False, allow_null=True)
+    logo = serializers.ImageField(required=False, allow_null=True, style={"base_template": "file.html"})
     created_by = serializers.PrimaryKeyRelatedField(
         queryset=UserTbl.objects.all(), required=True
     )
@@ -70,37 +73,57 @@ class UserCreateInputSerializer(serializers.Serializer):
 
 class TenantCombinedCreateSerializer(serializers.Serializer):
     tenant = TenantCreateInputSerializer(required=True)
-    operations = serializers.JSONField(required=False, default=list)
+    operations = TenantOperationCreateInputSerializer(many=True, required=False, default=list)
     role = RoleCreateInputSerializer(required=False, default=dict)
     user = UserCreateInputSerializer(required=True)
+    logo = serializers.ImageField(required=False, allow_null=True, write_only=True, style={"base_template": "file.html"})
 
-    def validate_operations(self, value):
-        if value in (None, ""):
-            return []
+    def _parse_json_value(self, value):
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return value
 
-        if isinstance(value, dict):
-            items = [value]
-        elif isinstance(value, list):
-            items = value
-        else:
-            raise serializers.ValidationError("operations must be an object or a list of objects.")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                if raw.startswith("{") and raw.endswith("}") and "},{" in raw:
+                    parts = [part.strip() for part in raw.split("},{")]
+                    parts[0] = parts[0].lstrip("{")
+                    parts[-1] = parts[-1].rstrip("}")
+                    return [json.loads(f"{{{part}}}") for part in parts]
+                raise
+        return value
 
-        validated_items = []
-        for item in items:
-            if not isinstance(item, dict):
-                raise serializers.ValidationError("each operation must be an object.")
+    def to_internal_value(self, data):
+        data = data.copy()
 
-            operation_serializer = TenantOperationCreateInputSerializer(data=item)
-            operation_serializer.is_valid(raise_exception=True)
-            validated_items.append(operation_serializer.validated_data)
+        if "tenant" in data and isinstance(data.get("tenant"), str):
+            data["tenant"] = self._parse_json_value(data["tenant"])
 
-        return validated_items
+        if "operations" in data and isinstance(data.get("operations"), str):
+            parsed_operations = self._parse_json_value(data["operations"])
+            if isinstance(parsed_operations, dict):
+                parsed_operations = [parsed_operations]
+            data["operations"] = parsed_operations
+
+        if "role" in data and isinstance(data.get("role"), str):
+            data["role"] = self._parse_json_value(data["role"])
+
+        if "user" in data and isinstance(data.get("user"), str):
+            data["user"] = self._parse_json_value(data["user"])
+
+        if "logo" not in data and self.context.get("files") and "logo" in self.context["files"]:
+            data["logo"] = self.context["files"]["logo"]
+
+        return super().to_internal_value(data)
 
     def create(self, validated_data):
         tenant_data = validated_data["tenant"]
         operations_data = validated_data.get("operations", [])
         role_data = validated_data.get("role") or {}
         user_data = validated_data["user"]
+        logo_file = validated_data.get("logo")
 
         with transaction.atomic():
             admin_user = UserTbl.objects.create(
@@ -117,6 +140,8 @@ class TenantCombinedCreateSerializer(serializers.Serializer):
             )
 
             tenant_payload = dict(tenant_data)
+            if logo_file is not None:
+                tenant_payload["logo"] = logo_file
             tenant_payload["created_by"] = tenant_payload.get("created_by").pk
             tenant = Tenant.objects.create(**tenant_payload)
             admin_user.tenant = tenant

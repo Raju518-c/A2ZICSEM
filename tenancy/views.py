@@ -22,20 +22,21 @@ class TenantCombinedCreateAPIView(APIView):
     permission_classes = [AllowAny]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
-    @extend_schema(
-        request=TenantCombinedCreateSerializer,
-        parameters=[
-            OpenApiParameter(
-                name="tenant",
-                description="JSON object containing tenant fields",
-                required=True,
-                type=dict,
-                location=OpenApiParameter.QUERY,
-            )
-        ],
-    )
+    @extend_schema(request={"multipart/form-data": TenantCombinedCreateSerializer})
     def post(self, request):
-        serializer = TenantCombinedCreateSerializer(data=request.data)
+        payload = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        if not payload:
+            payload = request.POST.copy() if hasattr(request.POST, "copy") else dict(request.POST)
+
+        if request.FILES:
+            payload = payload.copy() if hasattr(payload, "copy") else dict(payload)
+            for key, value in request.FILES.items():
+                payload[key] = value
+
+        serializer = TenantCombinedCreateSerializer(
+            data=payload,
+            context={"files": request.FILES},
+        )
 
         if not serializer.is_valid():
             return Response(
@@ -78,6 +79,7 @@ class TenantListCreateAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get(self, request):
         tenants = Tenant.objects.all().order_by("name")
@@ -92,7 +94,7 @@ class TenantListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
     
-    @extend_schema(request=TenantSerializer)
+    @extend_schema(request={"multipart/form-data": TenantSerializer})
     def post(self, request):
         serializer = TenantSerializer(data=request.data)
 
@@ -125,6 +127,7 @@ class TenantRetrieveUpdateDeleteAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get_object(self, pk):
         try:
@@ -154,7 +157,7 @@ class TenantRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
     
-    @extend_schema(request=TenantSerializer)
+    @extend_schema(request={"multipart/form-data": TenantSerializer})
     def put(self, request, pk):
         tenant = self.get_object(pk)
 

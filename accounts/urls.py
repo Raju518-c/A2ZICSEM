@@ -17,6 +17,7 @@ from .views import (
     UserTblListCreateAPIView,
     UserTblRetrieveUpdateDeleteAPIView,
     UserListAPIView, Stage1DetailsAPIView,
+    RegistrationUpdateAPIView,
 )
 
 app_name = "accounts"
@@ -25,6 +26,7 @@ urlpatterns = [
     path("login/", LoginAPIView.as_view(), name="login"),
     path("logout/", LogoutAPIView.as_view(), name="logout"),
     path("register/", RegisterAPIView.as_view(), name="register"),
+    path("registration-update/<int:application_id>/",RegistrationUpdateAPIView.as_view(),name="registration-update"),
     path("check-user/", CheckUserExistsAPIView.as_view(), name="check-user"),
     path("otp-request/", OTPRequestAPIView.as_view(), name="otp-request"),
     path("otp-verify/", OTPVerifyAPIView.as_view(), name="otp-verify"),

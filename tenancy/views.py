@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from .models import *
 from .serializers import *
-
+from django.utils import timezone
 from django.db import transaction
 from accounts.models import UserTbl, roles
 
@@ -24,17 +24,9 @@ class TenantCombinedCreateAPIView(APIView):
 
     @extend_schema(request={"multipart/form-data": TenantCombinedCreateSerializer})
     def post(self, request):
-        payload = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
-        if not payload:
-            payload = request.POST.copy() if hasattr(request.POST, "copy") else dict(request.POST)
-
-        if request.FILES:
-            payload = payload.copy() if hasattr(payload, "copy") else dict(payload)
-            for key, value in request.FILES.items():
-                payload[key] = value
-
+        print('request.data', request.data)
         serializer = TenantCombinedCreateSerializer(
-            data=payload,
+            data=request.data,
             context={"files": request.FILES},
         )
 

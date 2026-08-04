@@ -107,7 +107,8 @@ class UserTblRetrieveUpdateDeleteAPIView(APIView):
     GET    : Get user by ID
     PUT    : Update user (partial)
     DELETE : Delete user
-    """
+    """ 
+    permission_classes = [AllowAny]
 
     def get_object(self, pk):
         try:
@@ -217,7 +218,7 @@ class RegistrationApplicationListCreateAPIView(APIView):
     GET  : Get all registration applications
     POST : Create a new registration application
     """
-
+    permission_classes = [AllowAny]
     def get(self, request):
         applications = RegistrationApplication.objects.all().order_by("-created_at")
         serializer = RegistrationApplicationSerializer(applications, many=True)
@@ -244,7 +245,7 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update registration application (partial)
     DELETE : Delete registration application
     """
-
+    permission_classes = [AllowAny]
     def get_object(self, pk):
         try:
             return RegistrationApplication.objects.get(pk=pk)
@@ -811,6 +812,221 @@ class RegisterAPIView(APIView):
                 )
         except ValueError as exc:
             return Response({"success": False, "message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class RegistrationUpdateAPIView(APIView):
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    @extend_schema(request=RegisterRequestSerializer)
+    def put(self, request, application_id, *args, **kwargs):
+        serializer = RegisterRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        payload = serializer.validated_data
+
+        try:
+            application = RegistrationApplication.objects.select_related(
+                "tenant",
+                "user",
+            ).get(id=application_id)
+
+        except RegistrationApplication.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Registration application not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        tenant = application.tenant
+        user = application.user
+
+        try:
+            profile = ProfessionalProfile.objects.get(
+                registration_application=application
+            )
+        except ProfessionalProfile.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Professional profile not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        resume_file = payload.get("existing_resume")
+        profile_photo_file = payload.get("profile_photo")
+
+        try:
+            with transaction.atomic():
+
+                # -------------------------
+                # Update User
+                # -------------------------
+                user.email = (payload.get("email") or user.email).strip().lower()
+                user.mobile_country_code = payload.get(
+                    "mobile_country_code",
+                    user.mobile_country_code,
+                )
+                user.mobile_number = payload.get(
+                    "mobile_number",
+                    user.mobile_number,
+                )
+
+                if payload.get("password"):
+                    user.password = payload["password"]
+
+                user.referral_source = payload.get(
+                    "referral_source",
+                    user.referral_source,
+                )
+                user.referral_code = payload.get(
+                    "referral_code",
+                    user.referral_code,
+                )
+
+                if payload.get("mfa_method"):
+                    mfa_map = {
+                        "NONE": UserTbl.MfaMethod.NONE,
+                        "AUTHENTICATOR": UserTbl.MfaMethod.AUTHENTICATOR,
+                        "SMS": UserTbl.MfaMethod.SMS,
+                        "EMAIL": UserTbl.MfaMethod.EMAIL,
+                    }
+
+                    user.mfa_method = mfa_map.get(
+                        str(payload["mfa_method"]).upper(),
+                        user.mfa_method,
+                    )
+
+                user.save()
+
+                # -------------------------
+                # Update Registration Application
+                # -------------------------
+                industry = self._resolve_reference_value(
+                    payload.get("primary_industry")
+                )
+
+                scope = self._resolve_scope_catalog(
+                    payload.get("primary_scope")
+                )
+
+                if industry:
+                    application.selected_industry = industry
+
+                if scope:
+                    application.selected_scope = scope
+
+                application.selected_operating_country = (
+                    payload.get("country_of_residence") or ""
+                )[:2]
+
+                application.stage1_snapshot = {
+                    key: (
+                        value.name if hasattr(value, "name") else value
+                    )
+                    for key, value in payload.items()
+                    if key not in {
+                        "existing_resume",
+                        "profile_photo",
+                    }
+                }
+
+                # Increment Version
+                application.application_version += 1
+
+                application.save()
+
+                # -------------------------
+                # Update Professional Profile
+                # -------------------------
+                self._build_profile_payload(payload, profile)
+                profile.save()
+
+                # -------------------------
+                # Update Consent Records
+                # -------------------------
+                consent_map = {
+                    "terms": ConsentRecord.ConsentType.TERMS,
+                    "privacy": ConsentRecord.ConsentType.PRIVACY,
+                    "resume_processing": ConsentRecord.ConsentType.RESUME_PROCESSING,
+                    "marketing": ConsentRecord.ConsentType.MARKETING,
+                }
+
+                for input_key, consent_type in consent_map.items():
+
+                    if input_key not in payload:
+                        continue
+
+                    granted = self._coerce_bool(payload.get(input_key))
+
+                    ConsentRecord.objects.update_or_create(
+                        tenant=tenant,
+                        user=user,
+                        professional=profile,
+                        consent_type=consent_type,
+                        defaults={
+                            "document_version": "v1",
+                            "jurisdiction": (
+                                payload.get("country_of_residence") or ""
+                            )[:2],
+                            "is_granted": granted,
+                            "granted_at": timezone.now() if granted else None,
+                            "source": ConsentRecord.Source.WEB,
+                        },
+                    )
+
+                # -------------------------
+                # Resume Upload
+                # -------------------------
+                if resume_file:
+                    resume = self._create_resume_evidence(
+                        tenant,
+                        profile,
+                        user,
+                        resume_file,
+                    )
+                    profile.existing_resume = resume
+
+                # -------------------------
+                # Profile Photo Upload
+                # -------------------------
+                if profile_photo_file:
+                    photo = self._create_profile_photo_evidence(
+                        tenant,
+                        profile,
+                        user,
+                        profile_photo_file,
+                    )
+                    profile.profile_photo_evidence = photo
+
+                if resume_file or profile_photo_file:
+                    profile.save()
+
+                return Response(
+                    {
+                        "success": True,
+                        "message": "Registration updated successfully.",
+                        "data": {
+                            "application_id": application.id,
+                            "application_version": application.application_version,
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 @method_decorator(csrf_exempt, name='dispatch')
 class LoginAPIView(APIView):

@@ -2,12 +2,12 @@ import json
 
 from django.db import transaction
 from rest_framework import serializers
-
+from django.utils import timezone
 from accounts.models import UserTbl, roles
 from catalog.models import ReferenceValue
 
 from .models import *
-
+from django.http import QueryDict
 
 class TenantSerializer(serializers.ModelSerializer):
     logo = serializers.ImageField(required=False, allow_null=True, style={"base_template": "file.html"})
@@ -66,6 +66,7 @@ class UserCreateInputSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, write_only=True)
     role = serializers.CharField(required=False, allow_blank=True)
     approval_status = serializers.CharField(required=False, allow_blank=True)
+    approved_at = serializers.DateTimeField(required=False,allow_null=True,)
     is_active = serializers.BooleanField(required=False)
     is_staff = serializers.BooleanField(required=False)
     is_superuser = serializers.BooleanField(required=False)
@@ -83,40 +84,177 @@ class TenantCombinedCreateSerializer(serializers.Serializer):
             raw = value.strip()
             if not raw:
                 return value
-
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:
-                if raw.startswith("{") and raw.endswith("}") and "},{" in raw:
-                    parts = [part.strip() for part in raw.split("},{")]
-                    parts[0] = parts[0].lstrip("{")
-                    parts[-1] = parts[-1].rstrip("}")
-                    return [json.loads(f"{{{part}}}") for part in parts]
-                raise
+                # If raw contains multiple JSON objects separated by commas/newlines
+                # (e.g. '{...},\n{...}'), try to wrap them into a JSON array and parse.
+                try:
+                    wrapped = f"[{raw}]"
+                    return json.loads(wrapped)
+                except json.JSONDecodeError:
+                    # fall through and re-raise original error
+                    raise
         return value
 
-    def to_internal_value(self, data):
-        data = data.copy()
 
-        if "tenant" in data and isinstance(data.get("tenant"), str):
+    # def to_internal_value(self, data):
+
+    #     if isinstance(data, QueryDict):
+    #         data = dict(data)
+
+    #     # for key in ("tenant", "operations", "role", "user", "logo"):
+    #     #     if key in data and isinstance(data.get(key), (list, tuple)):
+    #     #         items = data.get(key)
+    #     #         if len(items) == 1:
+    #     #             data[key] = items[0]
+        
+    #     for key in ("tenant", "operations", "role", "user", "logo"):
+    #         if key in data and isinstance(data[key], list):
+    #             if len(data[key]) == 1:
+    #                 data[key] = data[key][0]
+
+    #     print("AFTER UNWRAP:", data)
+
+    #     # Unwrap single-item lists from QueryDict (multipart form fields)
+    #     # for key in ("tenant", "operations", "role", "user", "logo"):
+    #     #     if key in data and isinstance(data.get(key), (list, tuple)):
+    #     #         items = data.get(key)
+    #     #         if len(items) == 1:
+    #     #             data[key] = items[0]
+
+    #     if "tenant" in data and isinstance(data.get("tenant"), str):
+    #         data["tenant"] = self._parse_json_value(data["tenant"])
+
+    #     if "operations" in data and isinstance(data.get("operations"), str):
+    #         parsed_operations = self._parse_json_value(data["operations"])
+    #         if isinstance(parsed_operations, dict):
+    #             parsed_operations = [parsed_operations]
+    #         data["operations"] = parsed_operations
+
+    #     if "role" in data and isinstance(data.get("role"), str):
+    #         data["role"] = self._parse_json_value(data["role"])
+
+    #     if "user" in data and isinstance(data.get("user"), str):
+    #         data["user"] = self._parse_json_value(data["user"])
+
+    #     # If logo was uploaded via request.FILES, ensure it's set
+    #     if "logo" not in data and self.context.get("files") and "logo" in self.context["files"]:
+    #         data["logo"] = self.context["files"]["logo"]
+
+    #     print("AFTER JSON:", data)
+    #     return super().to_internal_value(data)
+
+    def to_internal_value(self, data):
+
+        # Convert QueryDict -> normal dict
+        if isinstance(data, QueryDict):
+            data = dict(data)
+
+        # Unwrap single-item lists
+        for key in ("tenant", "operations", "role", "user", "logo"):
+            if key in data and isinstance(data[key], list):
+                if len(data[key]) == 1:
+                    data[key] = data[key][0]
+
+        # Parse JSON strings
+        if isinstance(data.get("tenant"), str):
             data["tenant"] = self._parse_json_value(data["tenant"])
 
-        if "operations" in data and isinstance(data.get("operations"), str):
+        if isinstance(data.get("operations"), str):
             parsed_operations = self._parse_json_value(data["operations"])
+
             if isinstance(parsed_operations, dict):
                 parsed_operations = [parsed_operations]
+
             data["operations"] = parsed_operations
 
-        if "role" in data and isinstance(data.get("role"), str):
+        if isinstance(data.get("role"), str):
             data["role"] = self._parse_json_value(data["role"])
 
-        if "user" in data and isinstance(data.get("user"), str):
+        if isinstance(data.get("user"), str):
             data["user"] = self._parse_json_value(data["user"])
 
-        if "logo" not in data and self.context.get("files") and "logo" in self.context["files"]:
-            data["logo"] = self.context["files"]["logo"]
+        print("FINAL DATA:", data)
 
         return super().to_internal_value(data)
+    
+    
+    # def create(self, validated_data):
+    #     tenant_data = validated_data["tenant"]
+    #     operations_data = validated_data.get("operations", [])
+    #     role_data = validated_data.get("role") or {}
+    #     user_data = validated_data["user"]
+    #     logo_file = validated_data.get("logo")
+
+    #     with transaction.atomic():
+    #         approval_status = user_data.get(
+    #             "approval_status",
+    #             UserTbl.ApprovalStatus.APPROVED
+    #         )
+
+    #         approved_at = user_data.get("approved_at")
+
+    #         if (
+    #             approval_status == UserTbl.ApprovalStatus.APPROVED
+    #             and approved_at is None
+    #         ):
+    #             approved_at = timezone.now()
+
+    #         admin_user = UserTbl.objects.create(
+    #             email=user_data["email"].strip().lower(),
+    #             mobile_country_code=user_data["mobile_country_code"],
+    #             mobile_number=user_data["mobile_number"],
+    #             password=user_data["password"],
+    #             approval_status=approval_status,
+    #             approved_at=approved_at,
+    #             is_active=user_data.get("is_active", True),
+    #             is_staff=user_data.get("is_staff", True),
+    #             is_superuser=user_data.get("is_superuser", False),
+    #         )
+
+    #         tenant_payload = dict(tenant_data)
+    #         if logo_file is not None:
+    #             tenant_payload["logo"] = logo_file
+    #         tenant_payload["created_by"] = tenant_payload.get("created_by").pk
+    #         tenant = Tenant.objects.create(**tenant_payload)
+    #         admin_user.tenant = tenant
+    #         admin_user.save(update_fields=["tenant", "updated_at"])
+
+    #         role_code = (role_data.get("code") or user_data.get("role") or "Admin").strip()
+    #         role_name = (role_data.get("name") or role_code or "Admin").strip()
+    #         role_for = (role_data.get("roles_for") or "tenant admin").strip()
+
+    #         role_obj, _ = roles.objects.get_or_create(
+    #             code=role_code,
+    #             tenant=tenant,
+    #             defaults={"name": role_name, "roles_for": role_for},
+    #         )
+    #         admin_user.role.add(role_obj)
+
+    #         created_operations = []
+    #         for operation_data in operations_data:
+    #             operation_payload = {
+    #                 "tenant": tenant.pk,
+    #                 "industry": operation_data.get("industry").pk,
+    #                 "country_code": operation_data.get("country_code"),
+    #                 "region_name": operation_data.get("region_name", ""),
+    #                 "is_registration_enabled": operation_data.get(
+    #                     "is_registration_enabled", True
+    #                 ),
+    #                 "is_active": operation_data.get("is_active", True),
+    #                 "effective_from": operation_data.get("effective_from"),
+    #                 "effective_to": operation_data.get("effective_to"),
+    #                 "created_by": admin_user.pk,
+    #             }
+    #             created_operations.append(TenantOperation.objects.create(**operation_payload))
+
+    #     return {
+    #         "tenant": tenant,
+    #         "operations": created_operations,
+    #         "role": role_obj,
+    #         "user": admin_user,
+    #     }
 
     def create(self, validated_data):
         tenant_data = validated_data["tenant"]
@@ -126,54 +264,98 @@ class TenantCombinedCreateSerializer(serializers.Serializer):
         logo_file = validated_data.get("logo")
 
         with transaction.atomic():
+
+            approval_status = user_data.get(
+                "approval_status",
+                UserTbl.ApprovalStatus.APPROVED
+            )
+
+            approved_at = user_data.get("approved_at")
+
+            if (
+                approval_status == UserTbl.ApprovalStatus.APPROVED
+                and approved_at is None
+            ):
+                approved_at = timezone.now()
+
             admin_user = UserTbl.objects.create(
                 email=user_data["email"].strip().lower(),
                 mobile_country_code=user_data["mobile_country_code"],
                 mobile_number=user_data["mobile_number"],
                 password=user_data["password"],
-                approval_status=user_data.get(
-                    "approval_status", UserTbl.ApprovalStatus.APPROVED
-                ),
+
+                approval_status=approval_status,
+                approved_at=approved_at,
+
                 is_active=user_data.get("is_active", True),
                 is_staff=user_data.get("is_staff", True),
                 is_superuser=user_data.get("is_superuser", False),
             )
 
             tenant_payload = dict(tenant_data)
+
             if logo_file is not None:
                 tenant_payload["logo"] = logo_file
-            tenant_payload["created_by"] = tenant_payload.get("created_by").pk
+
             tenant = Tenant.objects.create(**tenant_payload)
+
             admin_user.tenant = tenant
             admin_user.save(update_fields=["tenant", "updated_at"])
 
-            role_code = (role_data.get("code") or user_data.get("role") or "Admin").strip()
-            role_name = (role_data.get("name") or role_code or "Admin").strip()
-            role_for = (role_data.get("roles_for") or "tenant admin").strip()
+            role_code = (
+                role_data.get("code")
+                or user_data.get("role")
+                or "Admin"
+            ).strip()
+
+            role_name = (
+                role_data.get("name")
+                or role_code
+                or "Admin"
+            ).strip()
+
+            role_for = (
+                role_data.get("roles_for")
+                or "tenant admin"
+            ).strip()
 
             role_obj, _ = roles.objects.get_or_create(
                 code=role_code,
                 tenant=tenant,
-                defaults={"name": role_name, "roles_for": role_for},
+                defaults={
+                    "name": role_name,
+                    "roles_for": role_for,
+                },
             )
+
             admin_user.role.add(role_obj)
 
             created_operations = []
+
             for operation_data in operations_data:
-                operation_payload = {
-                    "tenant": tenant.pk,
-                    "industry": operation_data.get("industry").pk,
-                    "country_code": operation_data.get("country_code"),
-                    "region_name": operation_data.get("region_name", ""),
-                    "is_registration_enabled": operation_data.get(
-                        "is_registration_enabled", True
-                    ),
-                    "is_active": operation_data.get("is_active", True),
-                    "effective_from": operation_data.get("effective_from"),
-                    "effective_to": operation_data.get("effective_to"),
-                    "created_by": admin_user.pk,
-                }
-                created_operations.append(TenantOperation.objects.create(**operation_payload))
+                created_operations.append(
+                    TenantOperation.objects.create(
+                        tenant=tenant,
+                        industry=operation_data["industry"],
+                        country_code=operation_data["country_code"],
+                        region_name=operation_data.get("region_name", ""),
+                        is_registration_enabled=operation_data.get(
+                            "is_registration_enabled",
+                            True,
+                        ),
+                        is_active=operation_data.get(
+                            "is_active",
+                            True,
+                        ),
+                        effective_from=operation_data.get(
+                            "effective_from"
+                        ),
+                        effective_to=operation_data.get(
+                            "effective_to"
+                        ),
+                        created_by=admin_user,
+                    )
+                )
 
         return {
             "tenant": tenant,
@@ -181,8 +363,6 @@ class TenantCombinedCreateSerializer(serializers.Serializer):
             "role": role_obj,
             "user": admin_user,
         }
-
-
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Organization

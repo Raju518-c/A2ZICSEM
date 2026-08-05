@@ -360,16 +360,26 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class RegistrationApplicationDecisionAPIView(APIView):
     """
-    POST : Tenant Admin approves or rejects a submitted registration
-    application (Stage 1 only).
+    POST : Tenant Admin approves, rejects, or returns a submitted
+    registration application (Stage 1 only).
 
     Approving only unlocks Stage 2 — RegistrationApplication.status becomes
     APPROVED, but UserTbl.approval_status intentionally stays
     PENDING_APPROVAL; the account is only fully APPROVED once Stage 2 is
     also approved (separate, not-yet-built decision on the Stage 2 side).
+    ProfessionalProfile.profile_status moves to STAGE1_COMPLETE.
 
     Rejecting is terminal for the whole account: UserTbl.approval_status
     becomes REJECTED and is_active is set False, blocking login.
+    ProfessionalProfile.profile_status also becomes REJECTED.
+
+    Returning sends the application back for corrections — a reason is
+    required. RegistrationApplication.status and ProfessionalProfile
+    .profile_status both become RETURNED so the applicant can fix and
+    resubmit via RegistrationApplicationResubmitAPIView (which already
+    accepts SUBMITTED or RETURNED). UserTbl.approval_status is left
+    untouched (stays PENDING_APPROVAL) — same as APPROVED, account-level
+    status only changes on a terminal/final outcome.
     """
 
     permission_classes = [AllowAny]
@@ -400,7 +410,7 @@ class RegistrationApplicationDecisionAPIView(APIView):
 
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-        decision = serializer.validated_data["decision"]
+        decision = serializer.validated_data["app_status"]
         reason = serializer.validated_data.get("reason", "")
         reviewed_by = self._resolve_reviewer(serializer.validated_data.get("reviewed_by"))
 
@@ -413,9 +423,10 @@ class RegistrationApplicationDecisionAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if decision == "REJECTED" and not reason:
+        decision_verbs = {"REJECTED": "reject", "RETURNED": "return"}
+        if decision in decision_verbs and not reason:
             return Response(
-                {"success": False, "message": "A reason is required to reject an application."},
+                {"success": False, "message": f"A reason is required to {decision_verbs[decision]} an application."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -435,6 +446,24 @@ class RegistrationApplicationDecisionAPIView(APIView):
                 # UserTbl is intentionally left untouched here — see class
                 # docstring. Stage 1 approval unlocks Stage 2; it does not
                 # approve the account.
+
+                profile = getattr(application, "professional_profile", None)
+                if profile is not None:
+                    profile.profile_status = ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE
+                    profile.save(update_fields=["profile_status", "updated_at"])
+            elif decision == "RETURNED":
+                application.status = RegistrationApplication.Status.RETURNED
+                application.save(
+                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
+                )
+                # UserTbl is intentionally left untouched here — see class
+                # docstring. Only terminal/final outcomes change account-level
+                # status; a return is neither.
+
+                profile = getattr(application, "professional_profile", None)
+                if profile is not None:
+                    profile.profile_status = ProfessionalProfile.ProfileStatus.RETURNED
+                    profile.save(update_fields=["profile_status", "updated_at"])
             else:
                 application.status = RegistrationApplication.Status.REJECTED
                 application.save(
@@ -445,6 +474,11 @@ class RegistrationApplicationDecisionAPIView(APIView):
                 user.rejection_reason = reason
                 user.is_active = False
                 user.save(update_fields=["approval_status", "rejection_reason", "is_active", "updated_at"])
+
+                profile = getattr(application, "professional_profile", None)
+                if profile is not None:
+                    profile.profile_status = ProfessionalProfile.ProfileStatus.REJECTED
+                    profile.save(update_fields=["profile_status", "updated_at"])
 
         return Response(
             {
@@ -608,6 +642,10 @@ class RegistrationApplicationResubmitAPIView(APIView):
             profile = ProfessionalProfile.objects.filter(user=user, tenant=tenant).first()
             if profile:
                 helper._build_profile_payload(payload, profile)
+                # Resubmitting replaces whatever the application was
+                # RETURNED/SUBMITTED for, so the profile goes back to
+                # SUBMITTED in lockstep with application.status below.
+                profile.profile_status = ProfessionalProfile.ProfileStatus.SUBMITTED
                 profile.save()
 
             application.application_version += 1
@@ -1069,7 +1107,7 @@ class RegisterAPIView(APIView):
                     tenant=tenant,
                     user=user,
                     registration_application=application,
-                    profile_status=ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE,
+                    profile_status=ProfessionalProfile.ProfileStatus.SUBMITTED,
                 )
                 self._build_profile_payload(payload, profile)
                 profile.save()
@@ -1783,12 +1821,12 @@ class RegistrationStatusAPIView(APIView):
         # Defensive fallback — shouldn't be reachable given the states above.
         return "STAGE_1"
 
-    def get(self, request, user_id):
+    def get(self, request, pk):
         try:
             user = UserTbl.objects.select_related(
                 "professional_profile",
                 "professional_profile__registration_application",
-            ).get(id=user_id)
+            ).get(id=pk)
         except UserTbl.DoesNotExist:
             return Response(
                 {"success": False, "message": "User not found."},

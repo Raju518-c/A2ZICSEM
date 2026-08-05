@@ -52,6 +52,7 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
         SUBMITTED = "SUBMITTED", "Submitted"
         APPROVED = "APPROVED", "Approved"
         RETURNED = "RETURNED", "Returned"
+        REJECTED = "REJECTED", "Rejected"
         ARCHIVED = "ARCHIVED", "Archived"
 
     class Classification(models.TextChoices):

@@ -191,7 +191,7 @@ class RegistrationApplicationDecisionSerializer(serializers.Serializer):
     lands.
     """
 
-    decision = serializers.ChoiceField(choices=["APPROVED", "REJECTED"])
+    app_status = serializers.ChoiceField(choices=["APPROVED", "REJECTED", "RETURNED"])
     reviewed_by = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -201,7 +201,7 @@ class RegistrationApplicationDecisionSerializer(serializers.Serializer):
     reason = serializers.CharField(
         required=False,
         allow_blank=True,
-        help_text="Required when decision=REJECTED.",
+        help_text="Required when app_status=REJECTED or RETURNED.",
     )
 
 

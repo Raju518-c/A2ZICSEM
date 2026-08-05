@@ -8,6 +8,7 @@ from .views import (
     OrganizationListCreateAPIView,
     OrganizationRetrieveUpdateDeleteAPIView,
     TenantCombinedCreateAPIView,
+    TenantResolveByHostAPIView,
 )
 
 app_name = "tenancy"
@@ -33,6 +34,11 @@ urlpatterns = [
         "tenant-operations/<int:pk>/",
         TenantOperationRetrieveUpdateDeleteAPIView.as_view(),
         name="tenant-operation-detail",
+    ),
+    path(
+        "tenant-by-host/",
+        TenantResolveByHostAPIView.as_view(),
+        name="tenant-by-host",
     ),
 
     path(

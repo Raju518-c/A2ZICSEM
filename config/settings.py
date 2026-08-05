@@ -45,12 +45,18 @@ ALLOWED_HOSTS = [
     "145.79.0.94",
     "localhost",
     "127.0.0.1",
-    "*",
+    ".localhost",
+    "qualion.com",
+    ".qualion.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://145.79.0.94:82",
     "http://localhost:3000",
+    "http://*.localhost:3000",
+    "http://qualion.com",
+    "https://qualion.com",
+    "https://*.qualion.com",
 ]
 
 
@@ -283,6 +289,10 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://([a-z0-9-]+\.)?localhost:3000$",
+    r"^https?://([a-z0-9-]+\.)?qualion\.com$",
+]
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------

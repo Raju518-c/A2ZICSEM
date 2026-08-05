@@ -110,6 +110,65 @@ class TenantListCreateAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TenantResolveByHostAPIView(APIView):
+    """Resolve the current tenant from the request host."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        host = request.get_host().split(":")[0].strip().lower()
+        print('TenantResolveByHostAPIView GET', host)
+        if not host:
+            return Response(
+                {"success": False, "message": "Tenant host not found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant_slug = host.split(".")[0]
+        if tenant_slug in {"localhost", "127", "127.0.0.1", "", "www"}:
+            return Response(
+                {"success": False, "message": "Tenant host not detected."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        tenant = Tenant.objects.filter(
+            Q(portal_slug=tenant_slug) | Q(custom_domain__iexact=host)
+        ).first()
+
+        if not tenant:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = TenantSerializer(tenant)
+        return Response(
+            {"success": True, "data": serializer.data},
+            status=status.HTTP_200_OK,
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Tenant created successfully.",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        return Response(
+            {
+                "success": False,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantRetrieveUpdateDeleteAPIView(APIView):
     """

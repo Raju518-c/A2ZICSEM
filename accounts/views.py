@@ -501,6 +501,11 @@ class RegistrationApplicationResubmitAPIView(APIView):
     """
     POST : Edit and resubmit a Stage 1 registration application.
 
+    Keyed by UserTbl id (not RegistrationApplication id) — the frontend
+    already holds the user id after login, and resubmit now mutates a
+    single RegistrationApplication row per user in place, so the user id
+    resolves it unambiguously.
+
     Allowed only while status is SUBMITTED or RETURNED (blocked once
     APPROVED/REJECTED). Mutates the same RegistrationApplication row in
     place: application_version is incremented, status is reset to
@@ -523,12 +528,14 @@ class RegistrationApplicationResubmitAPIView(APIView):
     serializer_class = RegistrationApplicationResubmitSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def post(self, request, pk):
-        try:
-            application = RegistrationApplication.objects.select_related("user", "tenant").get(pk=pk)
-        except RegistrationApplication.DoesNotExist:
+    def post(self, request, user_id):
+        applications = RegistrationApplication.objects.select_related("user", "tenant").filter(
+            user_id=user_id
+        ).order_by("-created_at")
+        application = applications.first()
+        if application is None:
             return Response(
-                {"success": False, "message": "Registration application not found."},
+                {"success": False, "message": "Registration application not found for this user."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 

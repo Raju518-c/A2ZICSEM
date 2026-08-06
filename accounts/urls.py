@@ -38,7 +38,7 @@ urlpatterns = [
     path("roles/", RoleListCreateAPIView.as_view(), name="roles-list-create"),
     path("roles/<int:pk>/", RoleRetrieveUpdateDeleteAPIView.as_view(), name="roles-detail"),
     path("registration-applications/<int:pk>/stage1_approval/", RegistrationApplicationDecisionAPIView.as_view(), name="registration-applications-decision"),
-    path("registration-applications/<int:pk>/resubmit/", RegistrationApplicationResubmitAPIView.as_view(), name="registration-applications-resubmit"),
+    path("registration-applications/user-id/<int:user_id>/resubmit/", RegistrationApplicationResubmitAPIView.as_view(), name="registration-applications-resubmit"),
     path("consent-records/", ConsentRecordListCreateAPIView.as_view(), name="consent-records-list-create"),
     path("consent-records/<int:pk>/", ConsentRecordRetrieveUpdateDeleteAPIView.as_view(), name="consent-records-detail"),
 

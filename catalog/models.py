@@ -18,6 +18,13 @@ from core.choices import DataClassification, PublicationStatus, ResumeVisibility
 from core.models import CreatedOnlyModel, TimeStampedModel
 from django.core.exceptions import ValidationError
 
+class ReferencevalueoptionSet(models.Model):
+    option_type=models.CharField(
+        max_length=80, null=True, blank=True, help_text="Category of controlled value, e.g. INDUSTRY, QUALION_LEVEL, "
+        "AUTHORITY_STATUS, CAREER_STAGE, QUALIFICATION_LEVEL, "
+        "PROFESSIONAL_ROLE, STANDARD, EQUIPMENT, SOFTWARE.",
+    )
+
 class ReferenceValue(TimeStampedModel):
     """Single platform master for controlled values such as Industry,
     Qualion Level, Authority Status, Career Stage, Qualification Level,
@@ -26,14 +33,9 @@ class ReferenceValue(TimeStampedModel):
     Key rules: Platform-level table with no tenant_id. Business tables
     reference the row ID, not a non-unique text code. Used only for values
     that require controlled matching/reporting.
-    """
-
-    option_set = models.CharField(
-        max_length=80,
-        db_index=True,
-        help_text="Category of controlled value, e.g. INDUSTRY, QUALION_LEVEL, "
-        "AUTHORITY_STATUS, CAREER_STAGE, QUALIFICATION_LEVEL, "
-        "PROFESSIONAL_ROLE, STANDARD, EQUIPMENT, SOFTWARE.",
+    """    
+    option_set = models.ForeignKey('ReferencevalueoptionSet', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='reference_values', help_text='Category of controlled value, e.g. INDUSTRY, QUALION_LEVEL, AUTHORITY_STATUS, CAREER_STAGE, QUALIFICATION_LEVEL, PROFESSIONAL_ROLE, STANDARD, EQUIPMENT, SOFTWARE.'
     )
     code = models.CharField(
         max_length=80, help_text="Stable uppercase machine code; unique with option_set."

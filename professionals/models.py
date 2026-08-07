@@ -590,7 +590,7 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
         CERTIFICATION = "CERTIFICATION", "Certification"
         TRAINING = "TRAINING", "Training"
         PASSPORT = "PASSPORT", "Passport"
-        VISA_WORK_PERMIT = "VISA_WORK_PERMIT", "Visa / work permit"
+        # VISA_WORK_PERMIT = "VISA_WORK_PERMIT", "Visa / work permit"
         MARINE_CDC = "MARINE_CDC", "Marine CDC"
         MARINE_COC = "MARINE_COC", "Marine COC"
         MEMBERSHIP = "MEMBERSHIP", "Membership"
@@ -628,6 +628,10 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
         related_name="credentials_issued",
         help_text="Structured issuing body. Same tenant; type should match "
         "record context where known.",
+    )
+    issuing_organization_other = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Optional free-text issuing body name; "
+        "used when no structured organization is available."
     )
     issuing_body_snapshot = models.CharField(
         max_length=200,
@@ -672,6 +676,15 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
     end_date = models.DateField(
         null=True, blank=True, help_text="Education/training end date."
     )
+    related_industry = models.ForeignKey(
+            "catalog.referencevalue",
+            on_delete=models.PROTECT,
+            null=True,
+            blank=True,
+            related_name="credentials",
+            help_text="Related technical industry; used when credential supports "
+            "a specific industry.",
+        )
     related_scope = models.ForeignKey(
         "catalog.ScopeCatalog",
         on_delete=models.PROTECT,
@@ -690,13 +703,16 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
         help_text="Related project; used for client approvals. Same "
         "tenant/professional.",
     )
-    client_organization = models.ForeignKey(
-        "tenancy.Organization",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="credentials_client_approved",
-        help_text="Client/agency associated with approval.",
+    # client_organization = models.ForeignKey(
+    #     "tenancy.Organization",
+    #     on_delete=models.PROTECT,
+    #     null=True,
+    #     blank=True,
+    #     related_name="credentials_client_approved",
+    #     help_text="Client/agency associated with approval.",
+    # )
+    client_organization = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Structured client. Same tenant; client type recommended."
     )
     restrictions_or_limitations = models.TextField(
         max_length=1000,
@@ -749,6 +765,18 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
         help_text="Restricted type-specific details; excluded from normal "
         "querysets and logs.",
     )
+    
+    primary_evidence = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="credential_records_primary",
+        help_text=(
+            "Primary supporting document. "
+            "Must belong to same professional."
+        ),
+    )
 
     class Meta:
         db_table = "professionals_credential_record"
@@ -784,6 +812,72 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
         return f"{self.professional} — {self.title}"
 
 
+class CredentialRecordItem(TenantOwnedModel, TimeStampedModel):
+
+    credential_record = models.ForeignKey(
+        CredentialRecord,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+
+    item_type = models.CharField(
+        max_length=50,
+        help_text="""
+        VISA_WORK_PERMIT
+        CDC_ENDORSEMENT
+        MEMBERSHIP_CHAPTER
+        CLIENT_APPROVAL_SCOPE
+        MEDICAL_RESTRICTION
+        """
+    )
+
+    title = models.CharField(
+        max_length=200,
+        blank=True
+    )
+
+    item_number = EncryptedCharField(
+        max_length=120,
+        blank=True
+    )
+
+    country_code = models.CharField(
+        max_length=2,
+        blank=True
+    )
+
+    issue_date = models.DateField(
+        null=True,
+        blank=True
+    )
+
+    expiry_date = models.DateField(
+        null=True,
+        blank=True
+    )
+
+    status = models.CharField(
+        max_length=20,
+        blank=True
+    )
+
+    details = models.JSONField(
+        default=dict,
+        blank=True
+    )
+
+    evidence_document = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="credential_record_items",
+        help_text=(
+            "Supporting document for the item. "
+            "Must belong to same professional."
+        ),
+    )
+        
 class CapabilityRecord(TenantOwnedModel, TimeStampedModel):
     """Optimised supporting record for languages, codes/standards,
     equipment, software, digital tools and soft skills.
@@ -964,6 +1058,10 @@ class ContactRecord(TenantOwnedModel, TimeStampedModel):
         blank=True,
         related_name="contact_records",
         help_text="Structured organisation reference.",
+    )
+    organization_other = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Optional free-text issuing body name; "
+        "used when no structured organization is available."
     )
     organization_name_snapshot = models.CharField(
         max_length=200,

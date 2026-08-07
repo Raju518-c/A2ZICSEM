@@ -33,14 +33,18 @@ class EmploymentRecord(TenantOwnedModel, TimeStampedModel):
         db_index=True,
         help_text="Professional who owns the employment record.",
     )
-    employer_organization = models.ForeignKey(
-        "tenancy.Organization",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="employment_records",
-        help_text="Structured employer. Same tenant; employer type recommended.",
+    # employer_organization = models.ForeignKey(
+    #     "tenancy.Organization",
+    #     on_delete=models.PROTECT,
+    #     null=True,
+    #     blank=True,
+    #     related_name="employment_records",
+    #     help_text="Structured employer. Same tenant; employer type recommended.",
+    # )
+    employer_organization = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Structured employer. Same tenant; employer type recommended."
     )
+    
     employer_name_snapshot = models.CharField(
         max_length=200,
         help_text="Employer name preserved for history/resume; required even "
@@ -79,6 +83,17 @@ class EmploymentRecord(TenantOwnedModel, TimeStampedModel):
         choices=VerificationStatus.choices,
         default=VerificationStatus.SELF_DECLARED,
         help_text="Verification state.",
+    )
+    evidence = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="employement_records",
+        help_text=(
+            "Primary supporting document. "
+            "Must belong to same professional."
+        ),
     )
     resume_visibility = models.CharField(
         max_length=30,
@@ -163,33 +178,39 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
         "Must belong to same professional; dates normally cover project.",
     )
     project_name = models.CharField(max_length=220, help_text="Project name.")
-    employer_organization = models.ForeignKey(
-        "tenancy.Organization",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="project_records_as_employer",
-        help_text="Employer/contracting organisation for project.",
+    # employer_organization = models.ForeignKey(
+    #     "tenancy.Organization",
+    #     on_delete=models.PROTECT,
+    #     null=True,
+    #     blank=True,
+    #     related_name="project_records_as_employer",
+    #     help_text="Employer/contracting organisation for project.",
+    # )
+    employer_organization = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Structured employer. Same tenant; employer type recommended."
     )
-    client_organization = models.ForeignKey(
-        "tenancy.Organization",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="project_records_as_client",
-        help_text="Structured client organisation. Same tenant; CLIENT type recommended.",
+    # client_organization = models.ForeignKey(
+    #     "tenancy.Organization",
+    #     on_delete=models.PROTECT,
+    #     null=True,
+    #     blank=True,
+    #     related_name="project_records_as_client",
+    #     help_text="Structured client organisation. Same tenant; CLIENT type recommended.",
+    # )
+    client_organization = models.CharField(
+        max_length=200, null=True, blank=True, help_text="Structured client. Same tenant; client type recommended."
     )
     client_name_snapshot = models.CharField(
         max_length=200,
         help_text="Client name as recorded for project; retained even if "
         "organisation renamed.",
     )
-    client_alias = models.CharField(
-        max_length=200,
-        blank=True,
-        help_text="Safe client alias, e.g. Confidential International EPC "
-        "Client. Required when visibility is masked and an alias is used.",
-    )
+    # client_alias = models.CharField(
+    #     max_length=200,
+    #     blank=True,
+    #     help_text="Safe client alias, e.g. Confidential International EPC "
+    #     "Client. Required when visibility is masked and an alias is used.",
+    # )
     client_visibility = models.CharField(
         max_length=40,
         choices=ClientVisibility.choices,
@@ -198,7 +219,10 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
     )
     country_code = models.CharField(max_length=2, blank=True, help_text="Project country.")
     city = models.CharField(max_length=120, blank=True, help_text="Project city/location.")
-    role_title = models.CharField(max_length=160, help_text="Role performed on project.")
+    role_title = models.ForeignKey('catalog.ReferenceValue', on_delete=models.PROTECT, null=True, blank=True, 
+        related_name='project_records_as_role', help_text='Role performed on project; option_set must be ROLE_TITLE.'
+    )
+    # role_title = models.CharField(max_length=160, help_text="Role performed on project.")
     start_date = models.DateField(help_text="Project start date; cannot be after end_date.")
     end_date = models.DateField(
         null=True,
@@ -248,6 +272,18 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
     achievements = models.TextField(
         max_length=1500, blank=True, help_text="Key achievements."
     )
+    achievement_evidence = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achievement_evidence",
+        help_text=(
+            "Primary supporting document. "
+            "Must belong to same professional."
+        ),
+    )
+    #evidence required for achievements 
     standards_applied = models.JSONField(
         default=list,
         blank=True,
@@ -260,12 +296,38 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
         default=VerificationStatus.SELF_DECLARED,
         help_text="Verification state.",
     )
+    verification_status_evidence = models.ForeignKey(
+        "evidence.EvidenceDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="verification_status_evidence",
+        help_text=(
+            "Primary supporting document. "
+            "Must belong to same professional."
+        ),
+    )
+    #evidence required for verification_status 
     status = models.CharField(
         max_length=20,
         choices=CompletionStatus.choices,
         default=CompletionStatus.DRAFT,
         db_index=True,
         help_text="Record completion status.",
+    )
+    Experience_classification = models.CharField(
+        max_length=30, null=True, blank=True, 
+        choices=[("Technical", "Technical"), ("Non-Technical/Administrative", "Non-Technical/Administrative"), ("Employement only", "Employement only")], 
+       help_text="Experience classification."
+    )
+    
+    industry_classification = models.ForeignKey(
+        "catalog.referencevalue",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="project_records",
+        help_text="Related industry; used for classification and reporting.",
     )
 
     class Meta:
@@ -289,13 +351,13 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
                 check=Q(allocation_percent__gt=0) & Q(allocation_percent__lte=100),
                 name="chk_project_record_allocation_percent_range",
             ),
-            models.CheckConstraint(
-                check=(
-                    ~Q(client_visibility="SHOW_MASKED_CLIENT_CATEGORY")
-                    | ~Q(client_alias="")
-                ),
-                name="chk_project_record_client_alias_required",
-            ),
+            # models.CheckConstraint(
+            #     check=(
+            #         ~Q(client_visibility="SHOW_MASKED_CLIENT_CATEGORY")
+            #         | ~Q(client_alias="")
+            #     ),
+            #     name="chk_project_record_client_alias_required",
+            # ),
         ]
 
     def __str__(self):

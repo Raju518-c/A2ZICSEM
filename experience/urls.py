@@ -24,6 +24,12 @@ urlpatterns = [
     ),
 
     path(
+        "project-records/bulk/",
+        BulkProjectRecordCreateAPIView.as_view(),
+        name="bulk-project-record-create",
+    ),
+
+    path(
         "project-records/<uuid:pk>/",
         ProjectRecordRetrieveUpdateDeleteAPIView.as_view(),
         name="project-record-detail",
@@ -33,6 +39,12 @@ urlpatterns = [
         "project-scopes/",
         ProjectScopeListCreateAPIView.as_view(),
         name="project-scope-list-create",
+    ),
+
+    path(
+        "project-scopes/<int:pk>/dynamic-form/",
+        ProjectScopeDynamicFormAPIView.as_view(),
+        name="project-scope-dynamic-form",
     ),
 
     path(
@@ -76,4 +88,6 @@ urlpatterns = [
         ProfessionalAssignmentRetrieveUpdateDeleteAPIView.as_view(),
         name="professional-assignment-detail",
     ),
+    
+    path("Validate-Experience", ValidateExperienceTabAPIView.as_view()),
 ]

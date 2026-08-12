@@ -1,9 +1,21 @@
 from rest_framework import serializers
 
-from .models import FormField, FormModule, ReferenceValue, ScopeCatalog, ScopeModule
+from .models import FormField, FormModule, ReferenceValue, ScopeCatalog, ScopeModule, ReferencevalueoptionSet
+
+
+
+class ReferenceValueOptionSetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReferencevalueoptionSet
+        fields = "__all__"
 
 
 class ReferenceValueSerializer(serializers.ModelSerializer):
+    option_set_value = ReferenceValueOptionSetSerializer(
+        source="option_set",
+        read_only=True
+    )
+
     class Meta:
         model = ReferenceValue
         fields = "__all__"

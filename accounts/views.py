@@ -12,6 +12,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.db import IntegrityError
 from core.choices import DataClassification, ResumeVisibility, VerificationStatus
 from evidence.models import EvidenceDocument
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -23,7 +24,7 @@ from accounts.models import (
     UserTbl,
     roles,
 )
-from catalog.models import ReferenceValue, ScopeCatalog
+from catalog.models import ReferenceValue, ReferencevalueoptionSet, ScopeCatalog
 from professionals.models import ProfessionalProfile
 from tenancy.models import Tenant, TenantOperation
 
@@ -745,37 +746,60 @@ class RegistrationApplicationResubmitAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordListCreateAPIView(APIView):
     """
-    GET  : Get all consent records
-    POST : Create a new consent record
-    """
-
+    GET  : Get the authenticated user's consent history
+    POST : Record one or many consent grants/withdrawals (append-only)
+    """        
     def get(self, request):
-        consent_records = ConsentRecord.objects.all().order_by("-created_at")
+        consent_records = ConsentRecord.objects.filter(user=request.user).order_by("-created_at")
         serializer = ConsentRecordSerializer(consent_records, many=True)
         return Response(
             {"success": True, "message": "Consent records fetched successfully.", "data": serializer.data},
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ConsentRecordSerializer)
+    @extend_schema(request=ConsentRecordSerializer(many=True))
     def post(self, request):
-        serializer = ConsentRecordSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {"success": True, "message": "Consent record created successfully.", "data": serializer.data},
-                status=status.HTTP_201_CREATED,
-            )
-        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        many = isinstance(request.data, list)
+        items = request.data if many else [request.data]
+
+        created = []
+        failed = []
+        for index, item in enumerate(items):
+            serializer = ConsentRecordSerializer(data=item)
+            if serializer.is_valid():
+                serializer.save(tenant=request.user.tenant, user=request.user)
+                created.append(serializer.data)
+            else:
+                failed.append({"index": index, "errors": serializer.errors})
+
+        if not many:
+            if created:
+                return Response(
+                    {"success": True, "message": "Consent record created successfully.", "data": created[0]},
+                    status=status.HTTP_201_CREATED,
+                )
+            return Response({"success": False, "errors": failed[0]["errors"]}, status=status.HTTP_400_BAD_REQUEST)
+
+        status_code = status.HTTP_201_CREATED if created else status.HTTP_400_BAD_REQUEST
+        return Response(
+            {
+                "success": bool(created),
+                "message": f"{len(created)} of {len(items)} consent record(s) created successfully.",
+                "data": created,
+                "errors": failed,
+            },
+            status=status_code,
+        )
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
     """
-    GET    : Get consent record by ID
-    PUT    : Update consent record (partial)
-    DELETE : Delete consent record
-    """
+    GET : Get consent record by ID.
 
+    No PUT/DELETE: ConsentRecord is append-only (CreatedOnlyModel) — a
+    withdrawal is recorded as a new row via POST, never an edit or delete
+    of an existing one.
+    """
     def get_object(self, pk):
         try:
             return ConsentRecord.objects.get(pk=pk)
@@ -876,6 +900,19 @@ class RegisterAPIView(APIView):
             return instance
         return None
 
+    def _get_or_create_reference_option_set(self, option_type):
+        if not option_type:
+            return None
+        option_type = str(option_type).strip()
+        if not option_type:
+            return None
+
+        option_set = ReferencevalueoptionSet.objects.filter(option_type=option_type).first()
+        if option_set:
+            return option_set
+
+        return ReferencevalueoptionSet.objects.create(option_type=option_type)
+
     def _coerce_bool(self, value):
         if isinstance(value, bool):
             return value
@@ -890,8 +927,9 @@ class RegisterAPIView(APIView):
         return bool(value)
     
     def _get_or_create_resume_evidence_type(self, user):
+        option_set = self._get_or_create_reference_option_set("EVIDENCE_TYPE")
         try:
-            return ReferenceValue.objects.get(option_set="EVIDENCE_TYPE", code="RESUME")
+            return ReferenceValue.objects.get(option_set=option_set, code="RESUME")
         except ReferenceValue.DoesNotExist:
             creator = UserTbl.objects.filter(pk__in=AuthUser.objects.values("pk")).first()
             if creator is None:
@@ -902,7 +940,7 @@ class RegisterAPIView(APIView):
                 creator = user
 
             return ReferenceValue.objects.create(
-                option_set="EVIDENCE_TYPE",
+                option_set=option_set,
                 code="RESUME",
                 label="Resume",
                 created_by=creator,
@@ -911,8 +949,9 @@ class RegisterAPIView(APIView):
             )
 
     def _get_or_create_profile_photo_evidence_type(self, user):
+        option_set = self._get_or_create_reference_option_set("EVIDENCE_TYPE")
         try:
-            return ReferenceValue.objects.get(option_set="EVIDENCE_TYPE", code="PHOTOGRAPH")
+            return ReferenceValue.objects.get(option_set=option_set, code="PHOTOGRAPH")
         except ReferenceValue.DoesNotExist:
             creator = UserTbl.objects.filter(pk__in=AuthUser.objects.values("pk")).first()
             if creator is None:
@@ -923,7 +962,7 @@ class RegisterAPIView(APIView):
                 creator = user
 
             return ReferenceValue.objects.create(
-                option_set="EVIDENCE_TYPE",
+                option_set=option_set,
                 code="PHOTOGRAPH",
                 label="Photograph",
                 created_by=creator,

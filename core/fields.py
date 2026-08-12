@@ -15,7 +15,10 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
-
+from cryptography.fernet import Fernet
+print('Fernet', Fernet.generate_key().decode())
+   
+   
 def _get_fernet():
     key = settings.FIELD_ENCRYPTION_KEY
     if not key:

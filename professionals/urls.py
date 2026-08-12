@@ -11,6 +11,8 @@ from .views import (
     ProfessionalProfileRetrieveUpdateDeleteAPIView,
     ProfessionalReviewListCreateAPIView,
     ProfessionalReviewRetrieveUpdateDeleteAPIView,
+    CombinedCredentialRecordAPIView,
+    ProfessionalCredentialListAPIView,
 )
 
 app_name = "professionals"
@@ -26,4 +28,9 @@ urlpatterns = [
     path("capability-records/<int:pk>/", CapabilityRecordRetrieveUpdateDeleteAPIView.as_view(), name="capability-record-detail"),
     path("contact-records/", ContactRecordListCreateAPIView.as_view(), name="contact-record-list-create"),
     path("contact-records/<int:pk>/", ContactRecordRetrieveUpdateDeleteAPIView.as_view(), name="contact-record-detail"),
+
+    path("combined-credential-record/",CombinedCredentialRecordAPIView.as_view(),name="combined-credential-record-create"),
+    path("combined-credential-record/<int:pk>/",CombinedCredentialRecordAPIView.as_view(),name="combined-credential-record-update"), 
+    
+    path("professional/<int:professional_id>/credentials/", ProfessionalCredentialListAPIView.as_view(), name="professional-credentials"), 
 ]

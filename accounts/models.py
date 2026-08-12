@@ -84,6 +84,8 @@ class roles(models.Model):
 
     created = models.DateTimeField(auto_now_add=True, help_text="Date and time of creation.")
 
+    def __str__(self):
+        return f"{self.name}"
 
 class UserTbl(UUIDModel):
     """Custom tenant-scoped account record. A person may register
@@ -287,6 +289,9 @@ class UserTbl(UUIDModel):
 
         super().save(*args, **kwargs)
 
+
+    def get_username(self):
+        return str(getattr(self, self.USERNAME_FIELD))
 
     def check_password(self, password):
         stored_password = self.password or ""

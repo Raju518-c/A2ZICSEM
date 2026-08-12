@@ -25,6 +25,9 @@ class ReferencevalueoptionSet(models.Model):
         "PROFESSIONAL_ROLE, STANDARD, EQUIPMENT, SOFTWARE.",
     )
 
+    def __str__(self):
+        return f"{self.option_type}"
+
 class ReferenceValue(TimeStampedModel):
     """Single platform master for controlled values such as Industry,
     Qualion Level, Authority Status, Career Stage, Qualification Level,

@@ -92,7 +92,7 @@ class ReferenceValue(TimeStampedModel):
   
 
     def __str__(self):
-        return f"{self.option_set}:{self.code}"
+        return f"{self.option_set}-{self.code}"
 
 
 class ScopeCatalog(TimeStampedModel):
@@ -229,7 +229,7 @@ class FormModule(TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"{self.module_code} v{self.version}"
+        return f"{self.module_code} -{self.version}"
 
 
 class ScopeModule(CreatedOnlyModel):
@@ -297,7 +297,7 @@ class ScopeModule(CreatedOnlyModel):
         ]
 
     def __str__(self):
-        return f"{self.scope} → {self.form_module} (#{self.sequence})"
+        return f"{self.scope} - {self.form_module}-{self.sequence}"
 
 
 class FormField(TimeStampedModel):

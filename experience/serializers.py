@@ -118,36 +118,168 @@ class ProjectRecordSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
-
 class ScopeResponseInputSerializer(serializers.Serializer):
-    field_code = serializers.CharField(required=True)
-    value = serializers.JSONField(required=False, allow_null=True)
+    form_field = serializers.IntegerField(required=True)
 
-
-class ProjectScopeInputSerializer(serializers.Serializer):
-    scope_name = serializers.CharField(required=False, allow_blank=False)
-    scope_code = serializers.CharField(required=False, allow_blank=False)
-    scope = serializers.CharField(required=False, allow_blank=False)
-    authority_action = serializers.CharField(required=False, allow_blank=True)
-    scope_responses = serializers.ListField(
-        child=ScopeResponseInputSerializer(), required=False, default=list
+    repeat_group_key = serializers.UUIDField(
+        required=False,
+        allow_null=True
     )
 
+    repeat_index = serializers.IntegerField(
+        required=False,
+        default=0
+    )
+
+    value = serializers.JSONField(
+        required=False,
+        allow_null=True
+    )
+
+    verification_status = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+    
+class ProjectScopeInputSerializer(serializers.Serializer):
+    scope = serializers.IntegerField(required=True)
+
+    activity_summary = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    verification_status = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    status = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    scope_responses = ScopeResponseInputSerializer(
+        many=True,
+        required=False
+    )
 
 class ProjectRecordInputSerializer(serializers.Serializer):
+
     project_name = serializers.CharField(required=True)
-    client = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    client_name_snapshot = serializers.CharField(required=False, allow_blank=True)
-    start_date = serializers.DateField(required=False, default=date.today)
-    end_date = serializers.DateField(required=False, allow_null=True)
-    is_current = serializers.BooleanField(required=False, default=False)
-    project_scopes = serializers.ListField(
-        child=ProjectScopeInputSerializer(), required=False, default=list
+
+    employer_organization = serializers.CharField(
+        required=False,
+        allow_blank=True
     )
 
+    client_organization = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    client_name_snapshot = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    client_visibility = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    country_code = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    city = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    role_title = serializers.IntegerField(
+        required=False,
+        allow_null=True
+    )
+
+    start_date = serializers.DateField(
+        required=False
+    )
+
+    end_date = serializers.DateField(
+        required=False,
+        allow_null=True
+    )
+
+    is_current = serializers.BooleanField(
+        required=False,
+        default=False
+    )
+
+    allocation_percent = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        required=False
+    )
+
+    is_primary_assignment = serializers.BooleanField(
+        required=False,
+        default=False
+    )
+
+    working_arrangement = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    engagement_explanation = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    declared_field_days = serializers.IntegerField(
+        required=False,
+        allow_null=True
+    )
+
+    responsibilities = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    achievements = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    verification_status = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    status = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    Experience_classification = serializers.CharField(
+        required=False,
+        allow_blank=True
+    )
+
+    industry_classification = serializers.IntegerField(
+        required=False,
+        allow_null=True
+    )
+
+    project_scopes = ProjectScopeInputSerializer(
+        many=True,
+        required=False
+    )
 
 class BulkProjectRecordSerializer(serializers.Serializer):
-    professional_profile = serializers.UUIDField(required=True)
+    professional = serializers.IntegerField(required=True)    
     project_records = serializers.ListField(
         child=ProjectRecordInputSerializer(), required=True
     )
@@ -157,15 +289,12 @@ class BulkProjectRecordSerializer(serializers.Serializer):
         professional = self.context.get("professional")
         if not tenant:
             raise serializers.ValidationError({"tenant": "Tenant context is required."})
-        if not professional:
-            raise serializers.ValidationError(
-                {"professional": "Professional context is required."}
-            )
+        
         return attrs
 
     def create(self, validated_data):
         tenant = self.context.get("tenant")
-        professional = self.context.get("professional")
+        professional = self.context["professional"]
         created_by = self.context.get("created_by")
         if not created_by and professional:
             created_by = getattr(professional, "user", None)
@@ -179,89 +308,227 @@ class BulkProjectRecordSerializer(serializers.Serializer):
                 project = ProjectRecord.objects.create(
                     tenant=tenant,
                     professional=professional,
+
                     project_name=project_payload["project_name"],
-                    client_name_snapshot=client_name,
-                    start_date=project_payload.get("start_date", date.today()),
-                    end_date=project_payload.get("end_date"),
-                    is_current=project_payload.get("is_current", False),
-                    status=CompletionStatus.DRAFT,
+
+                    employer_organization=project_payload.get("employer_organization"),
+                    client_organization=project_payload.get("client_organization"),
+
+                    client_name_snapshot=project_payload.get(
+                        "client_name_snapshot"
+                    ),
+
+                    client_visibility=project_payload.get(
+                        "client_visibility"
+                    ),
+
+                    country_code=project_payload.get(
+                        "country_code"
+                    ),
+
+                    city=project_payload.get(
+                        "city"
+                    ),
+
+                    role_title_id=project_payload.get(
+                        "role_title"
+                    ),
+
+                    start_date=project_payload.get(
+                        "start_date"
+                    ),
+
+                    end_date=project_payload.get(
+                        "end_date"
+                    ),
+
+                    is_current=project_payload.get(
+                        "is_current",
+                        False
+                    ),
+
+                    allocation_percent=project_payload.get(
+                        "allocation_percent"
+                    ),
+
+                    is_primary_assignment=project_payload.get(
+                        "is_primary_assignment",
+                        False
+                    ),
+
+                    working_arrangement=project_payload.get(
+                        "working_arrangement"
+                    ),
+
+                    engagement_explanation=project_payload.get(
+                        "engagement_explanation"
+                    ),
+
+                    declared_field_days=project_payload.get(
+                        "declared_field_days"
+                    ),
+
+                    responsibilities=project_payload.get(
+                        "responsibilities"
+                    ),
+
+                    achievements=project_payload.get(
+                        "achievements"
+                    ),
+
+                    verification_status=project_payload.get(
+                        "verification_status"
+                    ),
+
+                    status=project_payload.get(
+                        "status",
+                        CompletionStatus.DRAFT
+                    ),
+
+                    Experience_classification=project_payload.get(
+                        "Experience_classification"
+                    ),
+
+                    industry_classification_id=project_payload.get(
+                        "industry_classification"
+                    ),
                 )
 
                 for scope_payload in project_payload.get("project_scopes", []):
-                    scope_catalog = self._resolve_scope(scope_payload)
-                    authority_action = self._resolve_authority_action(scope_payload, created_by)
+                    scope_catalog = self._resolve_scope(scope_payload)                    
                     project_scope = ProjectScope.objects.create(
                         tenant=tenant,
                         project=project,
-                        scope=scope_catalog,
-                        authority_action=authority_action,
-                        status=CompletionStatus.DRAFT,
+
+                        scope_id=scope_payload["scope"],
+
+                        activity_summary=scope_payload.get(
+                            "activity_summary"
+                        ),
+
+                        verification_status=scope_payload.get(
+                            "verification_status"
+                        ),
+
+                        status=scope_payload.get(
+                            "status",
+                            CompletionStatus.DRAFT
+                        ),
                     )
 
                     for response_payload in scope_payload.get("scope_responses", []):
                         form_field = self._resolve_form_field(response_payload)
                         ScopeResponse.objects.create(
                             tenant=tenant,
+
                             project_scope=project_scope,
-                            form_field=form_field,
+
+                            form_field_id=response_payload["form_field"],
+
+                            repeat_group_key=response_payload.get(
+                                "repeat_group_key"
+                            ),
+
+                            repeat_index=response_payload.get(
+                                "repeat_index",
+                                0
+                            ),
+
                             value=response_payload.get("value"),
+
+                            verification_status=response_payload.get(
+                                "verification_status"
+                            ),
                         )
 
                 created_records.append(project)
 
         return created_records
 
+    # def _resolve_scope(self, scope_payload):
+    #     scope_ref = (
+    #         scope_payload.get("scope")
+    #         or scope_payload.get("scope_code")
+    #         or scope_payload.get("scope_name")
+    #     )
+    #     if not scope_ref:
+    #         raise serializers.ValidationError(
+    #             {"project_scopes": "Each scope entry must include scope_name, scope_code or scope."}
+    #         )
+
+    #     scope_catalog = ScopeCatalog.objects.filter(is_active=True).filter(
+    #         models.Q(scope_name__iexact=scope_ref) | models.Q(code__iexact=scope_ref)
+    #     ).first()
+    #     if not scope_catalog:
+    #         raise serializers.ValidationError(
+    #             {"project_scopes": f"Scope '{scope_ref}' was not found."}
+    #         )
+    #     return scope_catalog
+
     def _resolve_scope(self, scope_payload):
-        scope_ref = (
-            scope_payload.get("scope")
-            or scope_payload.get("scope_code")
-            or scope_payload.get("scope_name")
+
+        scope_id = scope_payload.get("scope")
+
+        if scope_id:
+            scope_catalog = ScopeCatalog.objects.filter(
+                pk=scope_id,
+                is_active=True
+            ).first()
+
+            if not scope_catalog:
+                raise serializers.ValidationError(
+                    {"project_scopes": f"Scope id '{scope_id}' was not found."}
+                )
+
+            return scope_catalog
+
+        scope_code = scope_payload.get("scope_code")
+        if scope_code:
+            scope_catalog = ScopeCatalog.objects.filter(
+                code__iexact=scope_code,
+                is_active=True
+            ).first()
+
+            if not scope_catalog:
+                raise serializers.ValidationError(
+                    {"project_scopes": f"Scope code '{scope_code}' was not found."}
+                )
+
+            return scope_catalog
+
+        scope_name = scope_payload.get("scope_name")
+        if scope_name:
+            scope_catalog = ScopeCatalog.objects.filter(
+                scope_name__iexact=scope_name,
+                is_active=True
+            ).first()
+
+            if not scope_catalog:
+                raise serializers.ValidationError(
+                    {"project_scopes": f"Scope name '{scope_name}' was not found."}
+                )
+
+            return scope_catalog
+
+        raise serializers.ValidationError(
+            {
+                "project_scopes":
+                "Each scope entry must include scope, scope_code or scope_name."
+            }
         )
-        if not scope_ref:
-            raise serializers.ValidationError(
-                {"project_scopes": "Each scope entry must include scope_name, scope_code or scope."}
-            )
-
-        scope_catalog = ScopeCatalog.objects.filter(is_active=True).filter(
-            models.Q(scope_name__iexact=scope_ref) | models.Q(code__iexact=scope_ref)
-        ).first()
-        if not scope_catalog:
-            raise serializers.ValidationError(
-                {"project_scopes": f"Scope '{scope_ref}' was not found."}
-            )
-        return scope_catalog
-
     def _resolve_form_field(self, response_payload):
-        field_code = response_payload.get("field_code")
-        if not field_code:
-            raise serializers.ValidationError(
-                {"scope_responses": "Each scope response must include field_code."}
-            )
+        field_id = response_payload.get("form_field")
 
-        field = FormField.objects.filter(field_code__iexact=field_code).first()
+        field = FormField.objects.filter(pk=field_id).first()
+
         if not field:
             raise serializers.ValidationError(
-                {"scope_responses": f"Form field '{field_code}' was not found."}
+                {"scope_responses": f"FormField '{field_id}' was not found."}
             )
+
         return field
 
-    def _resolve_authority_action(self, scope_payload, created_by):
-        authority_action = scope_payload.get("authority_action")
-        if authority_action:
-            reference_value = ReferenceValue.objects.filter(
-                models.Q(code__iexact=authority_action)
-                | models.Q(label__iexact=authority_action)
-            ).filter(option_set__option_type__iexact="AUTHORITY_ACTION").first()
-            if reference_value:
-                return reference_value
-
-        option_set, _ = ReferencevalueoptionSet.objects.get_or_create(option_type="AUTHORITY_ACTION")
-        reference_value, _ = ReferenceValue.objects.get_or_create(
-            option_set=option_set,
-            code="PERFORMED",
-            defaults={"label": "Performed", "created_by": created_by},
-        )
-        return reference_value
+    
 
 
 class ProjectScopeSerializer(serializers.ModelSerializer):

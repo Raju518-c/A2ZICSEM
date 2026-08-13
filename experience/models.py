@@ -393,6 +393,7 @@ class ProjectScope(TenantOwnedModel, TimeStampedModel):
     authority_action = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="project_scopes",
         help_text="Observed, assisted, performed, reviewed, approved, etc. "
         "option_set must be AUTHORITY_ACTION.",
@@ -489,11 +490,7 @@ class ScopeResponse(TenantOwnedModel, TimeStampedModel):
         verbose_name = "Scope Response"
         verbose_name_plural = "Scope Responses"
         ordering = ["project_scope", "form_field", "repeat_group_key", "repeat_index"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["project_scope", "form_field", "repeat_group_key", "repeat_index"],
-                name="uniq_scope_response_project_scope_field_group_index",
-            ),
+        constraints = [            
             models.CheckConstraint(
                 check=(
                     ~Q(verification_status__in=["VERIFIED", "VALIDATED"])

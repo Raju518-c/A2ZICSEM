@@ -417,27 +417,29 @@ class BulkProjectRecordCreateAPIView(APIView):
     """
     POST : Create multiple project records with nested scopes and scope responses.
     """
-
+    permission_classes = [AllowAny]
     @extend_schema(request=BulkProjectRecordSerializer)
     def post(self, request):
         user = getattr(request, "user", None)
-        professional_profile_id = (
-            request.data.get("professional_profile")
-            or request.data.get("professional_profile_id")
-        )
+        professional_id = request.data.get("professional")
+        print("professional_id =", professional_id)
+        print("request.data =", request.data)
         professional = None
         tenant = None
 
-        if professional_profile_id:
-            professional = ProfessionalProfile.objects.filter(pk=professional_profile_id).first()
+        if professional_id:
+            professional = ProfessionalProfile.objects.filter(
+                pk=professional_id
+            ).first()
+
             if professional:
-                tenant = getattr(professional, "tenant", None)
+                tenant = professional.user.tenant
 
         if not professional:
             return Response(
                 {
                     "success": False,
-                    "message": "ProfessionalProfile PK is required for bulk project creation.",
+                    "message": f"ProfessionalProfile with id '{professional_id}' not found."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -451,6 +453,9 @@ class BulkProjectRecordCreateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        print('professional 2', professional)
+        print('tenant 2', tenant)
+        
         serializer = BulkProjectRecordSerializer(
             data=request.data,
             context={

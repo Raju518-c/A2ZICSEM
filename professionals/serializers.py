@@ -90,7 +90,7 @@ class ContactRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ContactRecord
         fields = "__all__"
-        read_only_fields = ["created_at", "updated_at", "tenant"]
+        read_only_fields = ["created_at", "updated_at"]
 
     # Defaults documented on the model's help_text: reference contacts default
     # to CLIENT_SPECIFIC/SENSITIVE_PII, emergency contacts to NEVER/RESTRICTED_PII.
@@ -111,7 +111,8 @@ class ContactRecordSerializer(serializers.ModelSerializer):
             for field, value in defaults.items():
                 attrs.setdefault(field, value)
         return attrs
-
+    
+    
 class CombinedCredentialRecordItemSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
 

@@ -352,7 +352,7 @@ class ContactRecordListCreateAPIView(APIView):
         for index, item in enumerate(items):
             serializer = ContactRecordSerializer(data=item)
             if serializer.is_valid():
-                serializer.save(tenant=request.user.tenant)
+                serializer.save()
                 created.append(serializer.data)
             else:
                 failed.append({"index": index, "errors": serializer.errors})

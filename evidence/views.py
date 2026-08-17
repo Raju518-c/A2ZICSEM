@@ -16,8 +16,8 @@ class EvidenceDocumentListCreateAPIView(APIView):
     GET  : Get all evidence documents
     POST : Create a new evidence document
     """
-    from rest_framework.permissions import Permissions
-    permission_classes = [Permissions]
+
+    permission_classes = [AllowAny]
     
     def get(self, request):
         evidence_documents = EvidenceDocument.objects.all().order_by("-uploaded_at")
@@ -70,8 +70,7 @@ class EvidenceDocumentRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update evidence document
     DELETE : Delete evidence document
     """
-    from rest_framework.permissions import Permissions
-    permission_classes = [Permission]
+    permission_classes = [AllowAny]
     
     def get_object(self, pk):
         try:

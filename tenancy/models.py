@@ -1254,15 +1254,6 @@ class TenantBilling(UUIDModel, TenantOwnedModel):
 #     table with rows), never accounts.RoleCode (a TextChoices, not a
 #     model — cannot be a ForeignKey target).
 # =====================================================================
-class TenantInvitation(UUIDModel, TenantOwnedModel):
-    ...  # fields unchanged
-
-class TenantWorkflow(UUIDModel, TenantOwnedModel, TimeStampedModel):
-    ...  # fields unchanged
-
-class TenantOperationLog(UUIDModel, TenantOwnedModel):
-    ...  # fields unchanged
-
 
 #no api
 class TenantMembership(TenantOwnedModel, TimeStampedModel):

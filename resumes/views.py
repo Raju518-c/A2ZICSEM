@@ -16,7 +16,8 @@ class ResumeTemplateListCreateAPIView(APIView):
     GET  : Get all resume templates
     POST : Create a new resume template
     """
-
+    permission_classes = [AllowAny]
+   
     def get(self, request):
         resume_templates = ResumeTemplate.objects.all().order_by(
             "template_code",
@@ -72,7 +73,8 @@ class ResumeTemplateRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update resume template
     DELETE : Delete resume template
     """
-
+    permission_classes = [AllowAny]
+   
     def get_object(self, pk):
         try:
             return ResumeTemplate.objects.get(pk=pk)
@@ -170,7 +172,8 @@ class ResumeGenerationListCreateAPIView(APIView):
     GET  : Get all resume generations
     POST : Create a new resume generation
     """
-
+    permission_classes = [AllowAny]
+   
     def get(self, request):
         resume_generations = ResumeGeneration.objects.all().order_by(
             "-generated_at"
@@ -222,7 +225,8 @@ class ResumeGenerationRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update resume generation
     DELETE : Delete resume generation
     """
-
+    permission_classes = [AllowAny]
+   
     def get_object(self, pk):
         try:
             return ResumeGeneration.objects.get(pk=pk)

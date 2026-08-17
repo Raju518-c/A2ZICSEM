@@ -749,6 +749,8 @@ class ConsentRecordListCreateAPIView(APIView):
     GET  : Get the authenticated user's consent history
     POST : Record one or many consent grants/withdrawals (append-only)
     """        
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         consent_records = ConsentRecord.objects.filter(user=request.user).order_by("-created_at")
         serializer = ConsentRecordSerializer(consent_records, many=True)
@@ -800,6 +802,8 @@ class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):
     withdrawal is recorded as a new row via POST, never an edit or delete
     of an existing one.
     """
+    permission_classes = [AllowAny]
+        
     def get_object(self, pk):
         try:
             return ConsentRecord.objects.get(pk=pk)

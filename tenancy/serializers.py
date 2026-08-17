@@ -373,3 +373,308 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+
+class TenantLegalEntitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantLegalEntity
+        fields = "__all__"
+
+
+class TenantTaxRegistrationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantTaxRegistration
+        fields = "__all__"
+
+
+class TenantDomainSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantDomain
+        fields = "__all__"
+        
+
+class TenantIndustrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantIndustry
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+    # Docstring: "industry.option_set.option_type must be 'INDUSTRY' —
+    # enforce in clean()/serializer, catalog has no CHECK for it."
+    def validate_industry(self, value):
+        if getattr(value, "option_set", None) != "INDUSTRY":
+            raise serializers.ValidationError("Referenced value's option_set must be INDUSTRY.")
+        if not getattr(value, "is_active", True):
+            raise serializers.ValidationError("Referenced industry value is not active.")
+        return value
+
+
+class TenantScopeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantScope
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantBusinessUnitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantBusinessUnit
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantLocation
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]        
+    
+class TenantAuthorisedRepresentativeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantAuthorisedRepresentative
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantContact
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantVerificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantVerification
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
+class TenantDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantDocument
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+        
+
+
+class TenantLegalAcceptanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantLegalAcceptance
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
+class TenantLegalSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantLegalSettings
+        fields = "__all__"
+        read_only_fields = ["updated_at"]
+
+
+class TenantNdaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantNda
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
+class TenantSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantSettings
+        fields = "__all__"
+        read_only_fields = ["updated_at"]
+
+class TenantSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantSubscription
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class ModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantModuleEntitlementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantModuleEntitlement
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+class TenantBrandingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantBranding
+        fields = "__all__"
+        read_only_fields = ["updated_at"]
+
+
+class TenantReportTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantReportTemplate
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantSecuritySettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantSecuritySettings
+        fields = "__all__"
+        read_only_fields = ["updated_at"]
+
+
+class TenantIPRestrictionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantIPRestriction
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
+class TenantIntegrationSerializer(serializers.ModelSerializer):
+    # Docstring is explicit: "Never exported; encrypted at rest." That's a
+    # behavioral rule, not just a PII classification tag — write_only means
+    # it can be set on create/update but is never present in any response.
+    secret_reference = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = TenantIntegration
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantBillingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantBilling
+        fields = "__all__"
+        read_only_fields = ["updated_at"]
+
+
+
+class TenantInvitationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantInvitation
+        fields = "__all__"
+        read_only_fields = ["sent_at"]
+
+
+class TenantWorkflowSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantWorkflow
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantWorkflowStepSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantWorkflowStep
+        fields = "__all__"
+
+
+class TenantOperationLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantOperationLog
+        fields = "__all__"
+        read_only_fields = ["started_at"]
+
+
+class TenantTerminologySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantTerminology
+        fields = "__all__"
+
+
+class TenantNumberingConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantNumberingConfig
+        fields = "__all__"
+
+
+class TenantApprovalMatrixSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantApprovalMatrix
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class TenantNotificationSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantNotificationSettings
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class ConflictOfInterestDeclarationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConflictOfInterestDeclaration
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class DataExportRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DataExportRequest
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+        
+
+class ProjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Project
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class ProjectRequirementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectRequirement
+        fields = "__all__"
+
+
+class ProjectRequirementScopeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectRequirementScope
+        fields = "__all__"
+
+
+class ProjectCandidateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectCandidate
+        fields = "__all__"
+
+
+class DisclosureRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DisclosureRequest
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class CandidateConsentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CandidateConsent
+        fields = "__all__"
+        read_only_fields = ["decided_at"]
+
+
+class ProjectPlacementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectPlacement
+        fields = "__all__"
+
+
+class ProjectScopeLinkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectScopeLink
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+
+        
+
+
+
+
+
+

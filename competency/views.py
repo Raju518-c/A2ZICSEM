@@ -6,7 +6,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-
+from rest_framework.permissions import AllowAny
 from .models import *
 from .serializers import *
 
@@ -16,7 +16,8 @@ class ProfessionalScopeListCreateAPIView(APIView):
     GET  : Get all professional scopes
     POST : Create a new professional scope
     """
-
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         professional_scopes = ProfessionalScope.objects.all().order_by(
             "professional",
@@ -70,7 +71,8 @@ class ProfessionalScopeRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update professional scope
     DELETE : Delete professional scope
     """
-
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ProfessionalScope.objects.get(pk=pk)
@@ -170,7 +172,8 @@ class CompetencyAssessmentListCreateAPIView(APIView):
     GET  : Get all competency assessments
     POST : Create a new competency assessment
     """
-
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         competency_assessments = CompetencyAssessment.objects.all().order_by("-created_at")
 
@@ -220,7 +223,8 @@ class CompetencyAssessmentRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update competency assessment
     DELETE : Delete competency assessment
     """
-
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return CompetencyAssessment.objects.get(pk=pk)

@@ -1127,3 +1127,6 @@ class ContactRecord(TenantOwnedModel, TimeStampedModel):
     def __str__(self):
         return f"{self.full_name} ({self.contact_type})"
 
+
+
+

@@ -97,6 +97,7 @@ class EmploymentRecordListCreateAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
+    
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def get(self, request):
@@ -369,7 +370,8 @@ class ProjectRecordListCreateAPIView(APIView):
     GET  : Get all project records
     POST : Create a new project record
     """
-
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         project_records = ProjectRecord.objects.all().order_by("-start_date")
 
@@ -493,6 +495,8 @@ class ProjectRecordRetrieveUpdateDeleteAPIView(APIView):
     DELETE : Delete project record
     """
 
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ProjectRecord.objects.get(pk=pk)
@@ -592,6 +596,8 @@ class ProjectScopeListCreateAPIView(APIView):
     GET  : Get all project scopes
     POST : Create a new project scope
     """
+
+    permission_classes = [AllowAny]
 
     def get(self, request):
         project_scopes = ProjectScope.objects.all().order_by(
@@ -774,6 +780,8 @@ class ProjectScopeRetrieveUpdateDeleteAPIView(APIView):
     DELETE : Delete project scope
     """
 
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ProjectScope.objects.get(pk=pk)
@@ -874,6 +882,8 @@ class ScopeResponseListCreateAPIView(APIView):
     POST : Create a new scope response
     """
 
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         scope_responses = ScopeResponse.objects.all().order_by(
             "project_scope",
@@ -930,6 +940,8 @@ class ScopeResponseRetrieveUpdateDeleteAPIView(APIView):
     DELETE : Delete scope response
     """
 
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ScopeResponse.objects.get(pk=pk)
@@ -1027,6 +1039,8 @@ class ExposureLogListCreateAPIView(APIView):
     POST : Create a new exposure log
     """
 
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         exposure_logs = ExposureLog.objects.all().order_by("-activity_date")
 
@@ -1077,6 +1091,8 @@ class ExposureLogRetrieveUpdateDeleteAPIView(APIView):
     DELETE : Delete exposure log
     """
 
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ExposureLog.objects.get(pk=pk)
@@ -1177,6 +1193,8 @@ class ProfessionalAssignmentListCreateAPIView(APIView):
     POST : Create a new professional assignment
     """
 
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         assignments = ProfessionalAssignment.objects.all().order_by("-start_date")
 
@@ -1229,6 +1247,8 @@ class ProfessionalAssignmentRetrieveUpdateDeleteAPIView(APIView):
     DELETE : Delete professional assignment
     """
 
+    permission_classes = [AllowAny]
+    
     def get_object(self, pk):
         try:
             return ProfessionalAssignment.objects.get(pk=pk)
@@ -1320,6 +1340,8 @@ class ProfessionalAssignmentRetrieveUpdateDeleteAPIView(APIView):
         
 
 class ValidateExperienceTabAPIView(APIView):
+
+    permission_classes = [AllowAny]
 
     def post(self, request):
 

@@ -16,7 +16,8 @@ class AuditEventListCreateAPIView(APIView):
     GET  : Get all audit events
     POST : Create a new audit event
     """
-
+    permission_classes = [AllowAny]
+   
     def get(self, request):
         audit_events = AuditEvent.objects.all().order_by("-occurred_at")
 
@@ -66,7 +67,8 @@ class AuditEventRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update audit event
     DELETE : Delete audit event
     """
-
+    permission_classes = [AllowAny]
+   
     def get_object(self, pk):
         try:
             return AuditEvent.objects.get(pk=pk)

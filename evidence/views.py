@@ -6,7 +6,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-
+from rest_framework.permissions import AllowAny
 from .models import *
 from .serializers import *
 
@@ -16,7 +16,9 @@ class EvidenceDocumentListCreateAPIView(APIView):
     GET  : Get all evidence documents
     POST : Create a new evidence document
     """
-
+    from rest_framework.permissions import Permissions
+    permission_classes = [Permissions]
+    
     def get(self, request):
         evidence_documents = EvidenceDocument.objects.all().order_by("-uploaded_at")
 
@@ -68,7 +70,9 @@ class EvidenceDocumentRetrieveUpdateDeleteAPIView(APIView):
     PUT    : Update evidence document
     DELETE : Delete evidence document
     """
-
+    from rest_framework.permissions import Permissions
+    permission_classes = [Permission]
+    
     def get_object(self, pk):
         try:
             return EvidenceDocument.objects.get(pk=pk)

@@ -153,7 +153,7 @@ DATABASES = {
         },
     }
 }
-
+LOGIN_URL = '/admin/login/'
 # DATABASES = {
 #     "default": {
 #         "ENGINE": "django.db.backends.sqlite3",

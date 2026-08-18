@@ -290,11 +290,17 @@ SPECTACULAR_SETTINGS = {
 # CORS
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000", "http://145.79.0.94:83",)
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    [
+        "http://localhost:3000",
+        "http://145.79.0.94:83",
+    ]
+)
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https?://([a-z0-9-]+\.)?localhost:3000$",
+    r"^https?://localhost:3000$",
     r"^https?://([a-z0-9-]+\.)?qualion\.com$",
-    r"^https?://([a-z0-9-]+\.)?145\.79\.0\.94:83$",
+    r"^https?://145\.79\.0\.94:83$",
 ]
 CORS_ALLOW_CREDENTIALS = True
 

@@ -190,8 +190,8 @@ class EvidenceDocument(UUIDModel, TenantOwnedModel, ArchivableModel):
 
     class Meta:
         db_table = "evidence_document"
-        verbose_name = "Evidence Document"
-        verbose_name_plural = "Evidence Documents"
+        verbose_name = "EvidenceDocument"
+        verbose_name_plural = "EvidenceDocument"
         ordering = ["-uploaded_at"]
 
         constraints = [

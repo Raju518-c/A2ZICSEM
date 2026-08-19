@@ -18,9 +18,7 @@ from tenancy.models import *
 class DynamicTableQueryItemSerializer(serializers.Serializer):
     table = serializers.CharField(required=True)
     includes = serializers.DictField(required=False, default=dict, allow_empty=True)
-    include = serializers.DictField(required=False, default=dict, allow_empty=True, write_only=True)
-    excludes = serializers.DictField(required=False, default=dict, allow_empty=True)
-    exclude = serializers.DictField(required=False, default=dict, allow_empty=True, write_only=True)
+    excludes = serializers.DictField(required=False, default=dict, allow_empty=True)    
     return_fields = serializers.ListField(
         child=serializers.CharField(),
         required=False,
@@ -33,23 +31,24 @@ class DynamicTableQueryListSerializer(serializers.ListSerializer):
     child = DynamicTableQueryItemSerializer()
 
 
+
+class CoreRegistrationApplicationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegistrationApplication
+        fields = "__all__"
+
+
+
+class CoreConsentRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConsentRecord
+        fields = "__all__"
+
+
 class CoreUserTblSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserTbl
-        fields = (
-            "id",
-            "public_id",
-            "email",
-            "mobile_country_code",
-            "mobile_number",
-            "tenant",
-            "is_candidate",
-            "is_mentor",
-            "approval_status",
-            "is_active",
-            "date_joined",
-            "updated_at",
-        )
+        fields = "__all__"
 
 
 class CoreEmploymentRecordSerializer(serializers.ModelSerializer):
@@ -104,6 +103,8 @@ class CoreProfessionalReviewSerializer(serializers.ModelSerializer):
 
 class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
     user = CoreUserTblSerializer(read_only=True)
+    registration = CoreRegistrationApplicationSerializer(read_only=True)
+    consent_records = CoreConsentRecordSerializer(many=True, read_only=True)
     employment_records = CoreEmploymentRecordSerializer(many=True, read_only=True)
     project_records = CoreProjectRecordSerializer(many=True, read_only=True)
     credentials = CoreCredentialRecordSerializer(many=True, read_only=True)
@@ -119,6 +120,8 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
             "public_id",
             "tenant",
             "user",
+            "registration",
+            "consent_records",
             "registration_application",
             "profile_status",
             "current_classification",

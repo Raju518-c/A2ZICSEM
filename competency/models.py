@@ -93,8 +93,8 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "competency_professional_scope"
-        verbose_name = "Professional Scope"
-        verbose_name_plural = "Professional Scopes"
+        verbose_name = "ProfessionalScope"
+        verbose_name_plural = "ProfessionalScope"
         ordering = ["professional", "scope"]
         constraints = [
             models.UniqueConstraint(
@@ -250,8 +250,8 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
 
     class Meta:
         db_table = "competency_assessment"
-        verbose_name = "Competency Assessment"
-        verbose_name_plural = "Competency Assessments"
+        verbose_name = "CompetencyAssessment"
+        verbose_name_plural = "CompetencyAssessment"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(

@@ -140,12 +140,35 @@ class GlobalDynamicTableFilterAPIView(APIView):
 
         query = Q()
         for key, value in filters_dict.items():
-            if not hasattr(queryset.model, key):
+            # Convert dot notation to Django's double-underscore notation
+            # e.g., "professional.user.is_candidate" -> "professional__user__is_candidate"
+            django_key = key.replace(".", "__")
+            
+            # Try to validate the field path by splitting and checking
+            field_parts = django_key.split("__")
+            model = queryset.model
+            field_valid = True
+            
+            for part in field_parts:
+                if hasattr(model, part):
+                    field_obj = getattr(model, part)
+                    # If it's a relation, get the related model
+                    if hasattr(field_obj, "related_model"):
+                        model = field_obj.related_model
+                    elif hasattr(field_obj, "field") and hasattr(field_obj.field, "related_model"):
+                        model = field_obj.field.related_model
+                else:
+                    field_valid = False
+                    break
+            
+            if not field_valid:
                 continue
+            
             if mode == "include":
-                query &= self._build_filter_kwargs(key, value)
+                query &= self._build_filter_kwargs(django_key, value)
             else:
-                query &= ~self._build_filter_kwargs(key, value)
+                query &= ~self._build_filter_kwargs(django_key, value)
+        
         if mode == "include":
             return queryset.filter(query)
         return queryset.filter(~query)
@@ -215,8 +238,30 @@ class GlobalDynamicTableFilterAPIView(APIView):
                 valid_fields = []
                 for field_name in return_fields:
                     field = field_name.strip()
-                    if field and hasattr(model, field):
-                        valid_fields.append(field)
+                    if not field:
+                        continue
+                    # Convert dot notation to Django's __ notation for related fields
+                    django_field = field.replace(".", "__")
+                    
+                    # Simple validation: split and check if traversal is possible
+                    field_parts = django_field.split("__")
+                    check_model = model
+                    field_valid = True
+                    
+                    for part in field_parts:
+                        if hasattr(check_model, part):
+                            field_obj = getattr(check_model, part)
+                            if hasattr(field_obj, "related_model"):
+                                check_model = field_obj.related_model
+                            elif hasattr(field_obj, "field") and hasattr(field_obj.field, "related_model"):
+                                check_model = field_obj.field.related_model
+                        else:
+                            field_valid = False
+                            break
+                    
+                    if field_valid:
+                        valid_fields.append(django_field)
+                
                 if valid_fields:
                     queryset = queryset.values(*valid_fields)
                 else:
@@ -280,8 +325,30 @@ class GlobalDynamicTableFilterAPIView(APIView):
                 valid_fields = []
                 for field_name in return_fields:
                     field = field_name.strip()
-                    if field and hasattr(model, field):
-                        valid_fields.append(field)
+                    if not field:
+                        continue
+                    # Convert dot notation to Django's __ notation for related fields
+                    django_field = field.replace(".", "__")
+                    
+                    # Simple validation: split and check if traversal is possible
+                    field_parts = django_field.split("__")
+                    check_model = model
+                    field_valid = True
+                    
+                    for part in field_parts:
+                        if hasattr(check_model, part):
+                            field_obj = getattr(check_model, part)
+                            if hasattr(field_obj, "related_model"):
+                                check_model = field_obj.related_model
+                            elif hasattr(field_obj, "field") and hasattr(field_obj.field, "related_model"):
+                                check_model = field_obj.field.related_model
+                        else:
+                            field_valid = False
+                            break
+                    
+                    if field_valid:
+                        valid_fields.append(django_field)
+                
                 if valid_fields:
                     queryset = queryset.values(*valid_fields)
                 else:
@@ -301,4 +368,3 @@ class GlobalDynamicTableFilterAPIView(APIView):
             )
 
         return Response({"success": True, "data": results}, status=status.HTTP_200_OK)
-

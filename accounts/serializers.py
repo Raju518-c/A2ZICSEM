@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F
 from django.utils import timezone
 from rest_framework import serializers
-
+from professionals.models import ProfessionalProfile
 from accounts.models import (
     ConsentRecord,
     OTPVerification,
@@ -126,7 +126,21 @@ class RegisterRequestSerializer(serializers.Serializer):
         return super().to_internal_value(normalized_data)
 
 
+class ProfessionalProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProfessionalProfile
+        fields = "__all__"
+        read_only_fields = ["public_id", "created_at", "updated_at"]
+
+class RegistrationApplicationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegistrationApplication
+        fields = "__all__"
+        read_only_fields = ["public_id", "created_at", "updated_at"]
+
 class UserTblSerializer(serializers.ModelSerializer):
+    registration_application_status = serializers.SerializerMethodField()
+    professional_profile_status = serializers.SerializerMethodField()
 
     class Meta:
         model = UserTbl
@@ -150,6 +164,30 @@ class UserTblSerializer(serializers.ModelSerializer):
             },
         }
 
+    def get_field_names(self, declared_fields, info):
+        fields = super().get_field_names(declared_fields, info)
+
+        extra_fields = [
+            "registration_application_status",
+            "professional_profile_status",
+        ]
+
+        return list(fields) + [
+            field for field in extra_fields if field not in fields
+        ]
+
+    def get_registration_application_status(self, obj):
+        application = (
+            obj.registration_applications.order_by("-created_at").first()
+        )
+        return application.status if application else None
+
+    def get_professional_profile_status(self, obj):
+        try:
+            return obj.professional_profile.profile_status
+        except ProfessionalProfile.DoesNotExist:
+            return None
+
     def create(self, validated_data):
         roles = validated_data.pop("role", [])
         user = super().create(validated_data)
@@ -167,20 +205,14 @@ class UserTblSerializer(serializers.ModelSerializer):
             user.role.set(roles)
 
         return user
-
-
+    
+    
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = roles
         fields = "__all__"
         read_only_fields = ["created"]
 
-
-class RegistrationApplicationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = RegistrationApplication
-        fields = "__all__"
-        read_only_fields = ["public_id", "created_at", "updated_at"]
 
 
 class RegistrationApplicationDecisionSerializer(serializers.Serializer):

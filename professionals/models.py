@@ -376,8 +376,8 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "professionals_professional_profile"
-        verbose_name = "Professional Profile"
-        verbose_name_plural = "Professional Profiles"
+        verbose_name = "ProfessionalProfile"
+        verbose_name_plural = "ProfessionalProfile"
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
@@ -549,8 +549,8 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
 
     class Meta:
         db_table = "professionals_professional_review"
-        verbose_name = "Professional Review"
-        verbose_name_plural = "Professional Reviews"
+        verbose_name = "ProfessionalReview"
+        verbose_name_plural = "ProfessionalReview"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(
@@ -780,8 +780,8 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
 
     class Meta:
         db_table = "professionals_credential_record"
-        verbose_name = "Credential Record"
-        verbose_name_plural = "Credential Records"
+        verbose_name = "CredentialRecord"
+        verbose_name_plural = "CredentialRecord"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(
@@ -994,8 +994,8 @@ class CapabilityRecord(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "professionals_capability_record"
-        verbose_name = "Capability Record"
-        verbose_name_plural = "Capability Records"
+        verbose_name = "CapabilityRecord"
+        verbose_name_plural = "CapabilityRecord"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(
@@ -1110,8 +1110,8 @@ class ContactRecord(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "professionals_contact_record"
-        verbose_name = "Contact Record"
-        verbose_name_plural = "Contact Records"
+        verbose_name = "ContactRecord"
+        verbose_name_plural = "ContactRecord"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(

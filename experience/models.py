@@ -111,8 +111,8 @@ class EmploymentRecord(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "experience_employment_record"
-        verbose_name = "Employment Record"
-        verbose_name_plural = "Employment Records"
+        verbose_name = "EmploymentRecord"
+        verbose_name_plural = "EmploymentRecord"
         ordering = ["-start_date"]
         constraints = [
             models.CheckConstraint(
@@ -332,8 +332,8 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
 
     class Meta:
         db_table = "experience_project_record"
-        verbose_name = "Project Record"
-        verbose_name_plural = "Project Records"
+        verbose_name = "ProjectRecord"
+        verbose_name_plural = "ProjectRecord"
         ordering = ["-start_date"]
         constraints = [
             models.CheckConstraint(
@@ -414,8 +414,8 @@ class ProjectScope(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "experience_project_scope"
-        verbose_name = "Project Scope"
-        verbose_name_plural = "Project Scopes"
+        verbose_name = "ProjectScope"
+        verbose_name_plural = "ProjectScope"
         ordering = ["project", "scope"]
         constraints = [
             models.UniqueConstraint(
@@ -487,8 +487,8 @@ class ScopeResponse(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "experience_scope_response"
-        verbose_name = "Scope Response"
-        verbose_name_plural = "Scope Responses"
+        verbose_name = "ScopeResponse"
+        verbose_name_plural = "ScopeResponse"
         ordering = ["project_scope", "form_field", "repeat_group_key", "repeat_index"]
         constraints = [            
             models.CheckConstraint(
@@ -596,8 +596,8 @@ class ExposureLog(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "experience_exposure_log"
-        verbose_name = "Exposure Log"
-        verbose_name_plural = "Exposure Logs"
+        verbose_name = "ExposureLog"
+        verbose_name_plural = "ExposureLog"
         ordering = ["-activity_date"]
         constraints = [
             models.CheckConstraint(
@@ -724,8 +724,8 @@ class ProfessionalAssignment(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "experience_professional_assignment"
-        verbose_name = "Professional Assignment"
-        verbose_name_plural = "Professional Assignments"
+        verbose_name = "ProfessionalAssignment"
+        verbose_name_plural = "ProfessionalAssignment"
         ordering = ["-start_date"]
         constraints = [
             models.CheckConstraint(

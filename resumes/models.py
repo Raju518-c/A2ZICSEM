@@ -98,8 +98,8 @@ class ResumeTemplate(TenantOwnedModel, TimeStampedModel):
 
     class Meta:
         db_table = "resumes_resume_template"
-        verbose_name = "Resume Template"
-        verbose_name_plural = "Resume Templates"
+        verbose_name = "ResumeTemplate"
+        verbose_name_plural = "ResumeTemplates"
         ordering = ["template_code", "version"]
         constraints = [
             models.UniqueConstraint(
@@ -222,8 +222,8 @@ class ResumeGeneration(UUIDModel, TenantOwnedModel):
 
     class Meta:
         db_table = "resumes_resume_generation"
-        verbose_name = "Resume Generation"
-        verbose_name_plural = "Resume Generations"
+        verbose_name = "ResumeGeneration"
+        verbose_name_plural = "ResumeGeneration"
         ordering = ["-generated_at"]
         constraints = [
             models.CheckConstraint(

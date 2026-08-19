@@ -148,7 +148,7 @@ class Tenant(UUIDModel, TimeStampedModel):
     class Meta:
         db_table = "tenancy_tenant"
         verbose_name = "Tenant"
-        verbose_name_plural = "Tenants"
+        verbose_name_plural = "Tenant"
         ordering = ["name"]
 
     def __str__(self):
@@ -217,8 +217,8 @@ class TenantOperation(TimeStampedModel):
 
     class Meta:
         db_table = "tenancy_tenant_operation"
-        verbose_name = "Tenant Operation"
-        verbose_name_plural = "Tenant Operations"
+        verbose_name = "TenantOperation"
+        verbose_name_plural = "TenantOperation"
         ordering = ["tenant", "industry", "country_code"]
         constraints = [
             models.UniqueConstraint(
@@ -342,7 +342,7 @@ class Organization(UUIDModel, TimeStampedModel):
     class Meta:
         db_table = "tenancy_organization"
         verbose_name = "Organization"
-        verbose_name_plural = "Organizations"
+        verbose_name_plural = "Organization"
         ordering = ["tenant", "name"]
         constraints = [
             models.UniqueConstraint(

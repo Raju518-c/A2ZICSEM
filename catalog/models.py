@@ -80,8 +80,8 @@ class ReferenceValue(TimeStampedModel):
 
     class Meta:
         db_table = "catalog_reference_value"
-        verbose_name = "Reference Value"
-        verbose_name_plural = "Reference Values"
+        verbose_name = "ReferenceValue"
+        verbose_name_plural = "ReferenceValue"
         ordering = ["option_set", "sort_order", "label"]
         constraints = [
             models.UniqueConstraint(
@@ -153,8 +153,8 @@ class ScopeCatalog(TimeStampedModel):
 
     class Meta:
         db_table = "catalog_scope_catalog"
-        verbose_name = "Scope Catalog"
-        verbose_name_plural = "Scope Catalogs"
+        verbose_name = "ScopeCatalog"
+        verbose_name_plural = "ScopeCatalog"
         ordering = ["industry", "scope_name"]
         constraints = [
             models.UniqueConstraint(
@@ -211,8 +211,8 @@ class FormModule(TimeStampedModel):
 
     class Meta:
         db_table = "catalog_form_module"
-        verbose_name = "Form Module"
-        verbose_name_plural = "Form Modules"
+        verbose_name = "FormModule"
+        verbose_name_plural = "FormModule"
         ordering = ["module_code", "version"]
         constraints = [
             models.UniqueConstraint(
@@ -279,8 +279,8 @@ class ScopeModule(CreatedOnlyModel):
 
     class Meta:
         db_table = "catalog_scope_module"
-        verbose_name = "Scope Module"
-        verbose_name_plural = "Scope Modules"
+        verbose_name = "ScopeModule"
+        verbose_name_plural = "ScopeModule"
         ordering = ["scope", "sequence"]
         constraints = [
             models.UniqueConstraint(
@@ -404,8 +404,8 @@ class FormField(TimeStampedModel):
 
     class Meta:
         db_table = "catalog_form_field"
-        verbose_name = "Form Field"
-        verbose_name_plural = "Form Fields"
+        verbose_name = "FormField"
+        verbose_name_plural = "FormField"
         ordering = ["form_module", "sequence"]
         constraints = [
             models.UniqueConstraint(

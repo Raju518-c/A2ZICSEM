@@ -230,8 +230,8 @@ class UserTbl(UUIDModel):
 
     class Meta:
         db_table = "accounts_user"
-        verbose_name = "User"
-        verbose_name_plural = "Users"
+        verbose_name = "UserTbl"
+        verbose_name_plural = "UserTbl"
         ordering = ["email"]
         constraints = [
             models.UniqueConstraint(
@@ -407,8 +407,8 @@ class RegistrationApplication(TimeStampedModel, UUIDModel):
 
     class Meta:
         db_table = "accounts_registration_application"
-        verbose_name = "Registration Application"
-        verbose_name_plural = "Registration Applications"
+        verbose_name = "RegistrationApplication"
+        verbose_name_plural = "RegistrationApplication"
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
@@ -526,8 +526,8 @@ class ConsentRecord(CreatedOnlyModel):
 
     class Meta:
         db_table = "accounts_consent_record"
-        verbose_name = "Consent Record"
-        verbose_name_plural = "Consent Records"
+        verbose_name = "ConsentRecord"
+        verbose_name_plural = "ConsentRecord"
         ordering = ["-created_at"]
         constraints = [
             models.CheckConstraint(
@@ -614,8 +614,8 @@ class OTPVerification(models.Model):
 
     class Meta:
         db_table = "accounts_otp_verification"
-        verbose_name = "OTP Verification"
-        verbose_name_plural = "OTP Verifications"
+        verbose_name = "OTPVerification"
+        verbose_name_plural = "OTPVerification"
         ordering = ["-created_at"]
         indexes = [
             models.Index(

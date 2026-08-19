@@ -86,8 +86,8 @@ class AuditEvent(models.Model):
 
     class Meta:
         db_table = "governance_audit_event"
-        verbose_name = "Audit Event"
-        verbose_name_plural = "Audit Events"
+        verbose_name = "AuditEvent"
+        verbose_name_plural = "AuditEvent"
         ordering = ["-occurred_at"]
 
     def __str__(self):

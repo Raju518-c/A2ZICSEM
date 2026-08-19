@@ -141,27 +141,41 @@ ASGI_APPLICATION = "config.asgi.application"
 # ---------------------------------------------------------------------------
 DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "sqlite")
 
-if DATABASE_ENGINE == "mysql":
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": "a2znewpython",
-            "USER": "root",
-            "PASSWORD": "Root@1234",
-            "HOST": "localhost",
-            "PORT": "3306",
-            "OPTIONS": {
-                "charset": "utf8mb4",
-            },
-        }
+# if DATABASE_ENGINE == "mysql":
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": "django.db.backends.mysql",
+#             "NAME": "a2znewpython",
+#             "USER": "root",
+#             "PASSWORD": "Root@1234",
+#             "HOST": "localhost",
+#             "PORT": "3306",
+#             "OPTIONS": {
+#                 "charset": "utf8mb4",
+#             },
+#         }
+#     }
+# else:
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": "django.db.backends.sqlite3",
+#             "NAME": BASE_DIR / "db.sqlite3",
+#         }
+#     }
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": "a2znewpython",
+        "USER": "root",
+        "PASSWORD": "Root@1234",
+        "HOST": "localhost",
+        "PORT": "3306",
+        "OPTIONS": {
+            "charset": "utf8mb4",
+        },
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 LOGIN_URL = "/admin/login/"
 

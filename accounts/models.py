@@ -404,6 +404,12 @@ class RegistrationApplication(TimeStampedModel, UUIDModel):
     decision_reason = models.TextField(
         max_length=2000, blank=True, help_text="Review explanation."
     )
+    decision_history = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Append-only log of prior decision cycles (status, reason, "
+        "reviewer, timestamp, version) — captured before each overwrite.",
+    )
 
     class Meta:
         db_table = "accounts_registration_application"

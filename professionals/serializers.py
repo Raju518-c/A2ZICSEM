@@ -33,6 +33,46 @@ class ProfessionalReviewSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
 
 
+class Stage2SubmitSerializer(serializers.Serializer):
+    """No candidate-supplied fields. Everything ProfessionalReview needs
+    is derived server-side from the ProfessionalProfile itself. This
+    class exists only so the endpoint has a consistent serializer_class
+    attribute and can plug into extend_schema like the rest of the app.
+    """
+    pass
+
+
+class ProfessionalReviewDecisionSerializer(serializers.Serializer):
+    """Input for a reviewer deciding on a submitted ProfessionalReview.
+    Mirrors RegistrationApplicationDecisionSerializer's shape exactly.
+    """
+
+    decision = serializers.ChoiceField(choices=["APPROVED", "REJECTED", "RETURNED"])
+    final_classification = serializers.ChoiceField(
+        choices=["CANDIDATE", "MENTOR"],
+        required=False,
+        allow_blank=True,
+        help_text="Required when decision=APPROVED — DB constraint enforces this.",
+    )
+    reviewed_by = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True,
+        help_text="UserTbl id or public_id of the reviewing Tenant Admin/Reviewer.",
+    )
+    reason = serializers.CharField(
+        required=False, allow_blank=True,
+        help_text="Required when decision=REJECTED or RETURNED.",
+    )
+    reviewer_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class ProfessionalReviewResubmitSerializer(serializers.Serializer):
+    """No fields needed — resubmission just re-triggers the completeness
+    check and creates a fresh ProfessionalReview row against whatever
+    Stage 2 data the candidate has since corrected via the section POSTs.
+    """
+    pass
+
+
 class CredentialRecordItemSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
 

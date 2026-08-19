@@ -362,13 +362,12 @@ class LoginSerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError({"email": ["Invalid credentials."]})        
 
-        # PENDING_APPROVAL and APPROVED may both log in (Stage 1
-        # SUBMITTED/RETURNED/APPROVED and all of Stage 2, per the approval
-        # state machine) — only REJECTED and SUSPENDED are blocked.
-        if user.approval_status in (
-            UserTbl.ApprovalStatus.REJECTED,
-            UserTbl.ApprovalStatus.SUSPENDED,
-        ):
+        # PENDING_APPROVAL, APPROVED and REJECTED may all log in — a
+        # rejected candidate still needs to reach their account to see the
+        # rejection reason via registration-status/stage2_status. Only
+        # SUSPENDED is blocked (that's the deliberate account lock-out
+        # state, distinct from a rejection decision).
+        if user.approval_status == UserTbl.ApprovalStatus.SUSPENDED:
             raise serializers.ValidationError(
                 {"email": ["This account is not allowed to login."]}
             )

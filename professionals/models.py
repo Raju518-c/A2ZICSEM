@@ -50,6 +50,7 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
         STAGE1_COMPLETE = "STAGE1_COMPLETE", "Stage 1 complete"
         STAGE2_INCOMPLETE = "STAGE2_INCOMPLETE", "Stage 2 incomplete"
         SUBMITTED = "SUBMITTED", "Submitted"
+        STAGE2_SUBMITTED = "STAGE2_SUBMITTED", "Stage 2 submitted"
         APPROVED = "APPROVED", "Approved"
         RETURNED = "RETURNED", "Returned"
         REJECTED = "REJECTED", "Rejected"

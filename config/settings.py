@@ -139,27 +139,31 @@ ASGI_APPLICATION = "config.asgi.application"
 # tenant_id per row — see architecture doc). SQLite is offered purely as a
 # zero-setup local development option; switch with DATABASE_ENGINE in .env.
 # ---------------------------------------------------------------------------
+DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "sqlite")
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": "a2znewpython",
-        "USER": "root",
-        "PASSWORD": "Root@1234",
-        "HOST": "localhost",
-        "PORT": "3306",
-        "OPTIONS": {
-            "charset": "utf8mb4",
-        },
+if DATABASE_ENGINE == "mysql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": "a2znewpython",
+            "USER": "root",
+            "PASSWORD": "Root@1234",
+            "HOST": "localhost",
+            "PORT": "3306",
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
     }
-}
-LOGIN_URL = '/admin/login/'
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.sqlite3",
-#         "NAME": BASE_DIR / "db.sqlite3",
-#     }
-# }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+
+LOGIN_URL = "/admin/login/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

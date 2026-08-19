@@ -358,6 +358,24 @@ class RegistrationApplicationRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "message": "Registration application deleted successfully."}, status=status.HTTP_200_OK)
 
 
+def _snapshot_decision(application):
+    """Append the application's current (about-to-be-overwritten) decision
+    fields to decision_history. Shared by RegistrationApplicationDecisionAPIView
+    and RegistrationApplicationResubmitAPIView — both mutate
+    reviewed_by/reviewed_at/decision_reason in place, so a call site is
+    needed in each just before that overwrite happens. No-ops when there is
+    nothing to capture yet (the application's first decision cycle).
+    """
+    if application.decision_reason or application.reviewed_by_id or application.reviewed_at:
+        application.decision_history.append({
+            "status": application.status,
+            "decision_reason": application.decision_reason,
+            "reviewed_by": str(application.reviewed_by_id) if application.reviewed_by_id else None,
+            "reviewed_at": application.reviewed_at.isoformat() if application.reviewed_at else None,
+            "application_version": application.application_version,
+        })
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class RegistrationApplicationDecisionAPIView(APIView):
     """
@@ -370,8 +388,10 @@ class RegistrationApplicationDecisionAPIView(APIView):
     also approved (separate, not-yet-built decision on the Stage 2 side).
     ProfessionalProfile.profile_status moves to STAGE1_COMPLETE.
 
-    Rejecting is terminal for the whole account: UserTbl.approval_status
-    becomes REJECTED and is_active is set False, blocking login.
+    Rejecting is terminal for this application: UserTbl.approval_status
+    becomes REJECTED, but is_active is left untouched — a rejected
+    candidate can still log in (LoginSerializer no longer blocks
+    REJECTED, only SUSPENDED) to see their status and reason.
     ProfessionalProfile.profile_status also becomes REJECTED.
 
     Returning sends the application back for corrections — a reason is
@@ -381,6 +401,16 @@ class RegistrationApplicationDecisionAPIView(APIView):
     accepts SUBMITTED or RETURNED). UserTbl.approval_status is left
     untouched (stays PENDING_APPROVAL) — same as APPROVED, account-level
     status only changes on a terminal/final outcome.
+
+    decision_history: the status gate above guarantees this view only ever
+    runs on a fresh SUBMITTED cycle — either the application's first
+    decision ever, or immediately after RegistrationApplicationResubmitAPIView
+    cleared reviewed_by/reviewed_at/decision_reason. Either way those three
+    fields are already blank by the time this view runs, so
+    _snapshot_decision's guard never actually fires here; the resubmit view
+    is where a prior decision's fields get captured before being wiped. The
+    call here is kept for defensive symmetry in case that invariant ever
+    changes.
     """
 
     permission_classes = [AllowAny]
@@ -435,6 +465,14 @@ class RegistrationApplicationDecisionAPIView(APIView):
         user = application.user
 
         with transaction.atomic():
+            # Snapshot whatever decision is currently on the row before it's
+            # overwritten below — see _snapshot_decision's docstring. Not
+            # needed for APPROVED: nothing meaningful is being overwritten
+            # there (this is always a fresh SUBMITTED cycle; see the class
+            # docstring's decision_history note).
+            if decision in ("RETURNED", "REJECTED"):
+                _snapshot_decision(application)
+
             application.reviewed_by = reviewed_by
             application.reviewed_at = now
             application.decision_reason = reason
@@ -455,7 +493,7 @@ class RegistrationApplicationDecisionAPIView(APIView):
             elif decision == "RETURNED":
                 application.status = RegistrationApplication.Status.RETURNED
                 application.save(
-                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
+                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "decision_history", "updated_at"]
                 )
                 # UserTbl is intentionally left untouched here — see class
                 # docstring. Only terminal/final outcomes change account-level
@@ -468,13 +506,12 @@ class RegistrationApplicationDecisionAPIView(APIView):
             else:
                 application.status = RegistrationApplication.Status.REJECTED
                 application.save(
-                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "updated_at"]
+                    update_fields=["status", "reviewed_by", "reviewed_at", "decision_reason", "decision_history", "updated_at"]
                 )
 
                 user.approval_status = UserTbl.ApprovalStatus.REJECTED
                 user.rejection_reason = reason
-                user.is_active = False
-                user.save(update_fields=["approval_status", "rejection_reason", "is_active", "updated_at"])
+                user.save(update_fields=["approval_status", "rejection_reason", "updated_at"])
 
                 profile = getattr(application, "professional_profile", None)
                 if profile is not None:
@@ -512,7 +549,9 @@ class RegistrationApplicationResubmitAPIView(APIView):
     place: application_version is incremented, status is reset to
     SUBMITTED, submitted_at is refreshed, and any prior review decision
     (reviewed_by/reviewed_at/decision_reason) is cleared since it no
-    longer applies to the updated content. UserTbl
+    longer applies to the updated content — but first appended to
+    decision_history, so a RETURNED/REJECTED decision that led to this
+    resubmit isn't lost, just superseded. UserTbl
     (email/mobile/mfa_method/referral_*) and the linked
     ProfessionalProfile's Stage 1 fields are updated in place too.
     Changing email or mobile clears its verified_at timestamp, so it must
@@ -656,6 +695,12 @@ class RegistrationApplicationResubmitAPIView(APIView):
                 profile.profile_status = ProfessionalProfile.ProfileStatus.SUBMITTED
                 profile.save()
 
+            # Snapshot the prior decision (if any) before it's cleared below
+            # and before application_version is bumped — the snapshot must
+            # record the version that decision actually applied to, not the
+            # new one this resubmit is about to create.
+            _snapshot_decision(application)
+
             application.application_version += 1
             application.selected_industry = industry
             application.selected_scope = scope
@@ -683,6 +728,7 @@ class RegistrationApplicationResubmitAPIView(APIView):
                     "reviewed_by",
                     "reviewed_at",
                     "decision_reason",
+                    "decision_history",
                     "stage1_snapshot",
                     "updated_at",
                 ]
@@ -1836,9 +1882,13 @@ class Stage1DetailsAPIView(APIView):
 class RegistrationStatusAPIView(APIView):
     """
     GET : Lightweight status summary for a user — the 3 raw status fields
-    the frontend needs to check (per the approval state machine), plus a
+    the frontend needs to check (per the approval state machine), a
     derived current_stage label so the frontend doesn't have to
-    reimplement that derivation itself.
+    reimplement that derivation itself, the current decision_reason (why a
+    RETURNED/REJECTED application was returned or rejected), and the full
+    decision_history — every prior decision cycle superseded by a
+    resubmit — so the frontend can show the whole review trail without a
+    second call.
 
     Unlike Stage1DetailsAPIView, this returns only status fields, not full
     table contents.
@@ -1901,6 +1951,8 @@ class RegistrationStatusAPIView(APIView):
                     "current_stage": self._compute_current_stage(
                         user_approval_status, application_status, profile_status
                     ),
+                    "decision_reason": application.decision_reason if application else "",
+                    "decision_history": application.decision_history if application else [],
                 },
             },
             status=status.HTTP_200_OK,

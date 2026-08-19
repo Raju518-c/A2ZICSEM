@@ -282,17 +282,31 @@ class RegistrationApplicationResubmitSerializer(serializers.Serializer):
     marketing = serializers.BooleanField(required=False)
 
 
+# class ConsentRecordSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = ConsentRecord
+#         fields = "__all__"
+#         read_only_fields = ["created_at", "tenant", "user"]
+
+#     def validate(self, attrs):
+#         if attrs.get("is_granted") and not attrs.get("granted_at"):
+#             attrs["granted_at"] = timezone.now()
+#         return attrs
+
 class ConsentRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConsentRecord
         fields = "__all__"
-        read_only_fields = ["created_at", "tenant", "user"]
+        read_only_fields = [
+            "id",
+            "created_at",
+        ]
 
     def validate(self, attrs):
         if attrs.get("is_granted") and not attrs.get("granted_at"):
             attrs["granted_at"] = timezone.now()
-        return attrs
-        
+
+        return attrs        
 
 
 class LoginSerializer(serializers.Serializer):

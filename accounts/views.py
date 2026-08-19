@@ -805,6 +805,40 @@ class ConsentRecordListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    # @extend_schema(request=ConsentRecordSerializer(many=True))
+    # def post(self, request):
+    #     many = isinstance(request.data, list)
+    #     items = request.data if many else [request.data]
+
+    #     created = []
+    #     failed = []
+    #     for index, item in enumerate(items):
+    #         serializer = ConsentRecordSerializer(data=item)
+    #         if serializer.is_valid():
+    #             serializer.save(tenant=request.user.tenant, user=request.user)
+    #             created.append(serializer.data)
+    #         else:
+    #             failed.append({"index": index, "errors": serializer.errors})
+
+    #     if not many:
+    #         if created:
+    #             return Response(
+    #                 {"success": True, "message": "Consent record created successfully.", "data": created[0]},
+    #                 status=status.HTTP_201_CREATED,
+    #             )
+    #         return Response({"success": False, "errors": failed[0]["errors"]}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     status_code = status.HTTP_201_CREATED if created else status.HTTP_400_BAD_REQUEST
+    #     return Response(
+    #         {
+    #             "success": bool(created),
+    #             "message": f"{len(created)} of {len(items)} consent record(s) created successfully.",
+    #             "data": created,
+    #             "errors": failed,
+    #         },
+    #         status=status_code,
+    #     )
+
     @extend_schema(request=ConsentRecordSerializer(many=True))
     def post(self, request):
         many = isinstance(request.data, list)
@@ -812,32 +846,60 @@ class ConsentRecordListCreateAPIView(APIView):
 
         created = []
         failed = []
+
         for index, item in enumerate(items):
             serializer = ConsentRecordSerializer(data=item)
+
             if serializer.is_valid():
-                serializer.save(tenant=request.user.tenant, user=request.user)
+                serializer.save(
+                    tenant_id=item.get("tenant"),
+                    user_id=item.get("user"),
+                )
                 created.append(serializer.data)
             else:
-                failed.append({"index": index, "errors": serializer.errors})
+                failed.append({
+                    "index": index,
+                    "errors": serializer.errors,
+                })
 
         if not many:
             if created:
                 return Response(
-                    {"success": True, "message": "Consent record created successfully.", "data": created[0]},
+                    {
+                        "success": True,
+                        "message": "Consent record created successfully.",
+                        "data": created[0],
+                    },
                     status=status.HTTP_201_CREATED,
                 )
-            return Response({"success": False, "errors": failed[0]["errors"]}, status=status.HTTP_400_BAD_REQUEST)
 
-        status_code = status.HTTP_201_CREATED if created else status.HTTP_400_BAD_REQUEST
+            return Response(
+                {
+                    "success": False,
+                    "errors": failed[0]["errors"],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        status_code = (
+            status.HTTP_201_CREATED
+            if created
+            else status.HTTP_400_BAD_REQUEST
+        )
+
         return Response(
             {
                 "success": bool(created),
-                "message": f"{len(created)} of {len(items)} consent record(s) created successfully.",
+                "message": (
+                    f"{len(created)} of {len(items)} "
+                    "consent record(s) created successfully."
+                ),
                 "data": created,
                 "errors": failed,
             },
             status=status_code,
         )
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ConsentRecordRetrieveUpdateDeleteAPIView(APIView):

@@ -344,14 +344,17 @@ class ProfessionalReviewDecisionAPIView(APIView):
         return None
 
     @extend_schema(request=ProfessionalReviewDecisionSerializer)
-    def post(self, request, review_id):
-        try:
-            review = ProfessionalReview.objects.select_related(
-                "professional", "professional__user"
-            ).get(pk=review_id)
-        except ProfessionalReview.DoesNotExist:
+    def post(self, request, professional_id):
+        review = ProfessionalReview.objects.select_related(
+            "professional", "professional__user"
+        ).filter(
+            professional_id=professional_id,
+            review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
+            decision=ProfessionalReview.Decision.PENDING,
+        ).order_by("-created_at").first()
+        if review is None:
             return Response(
-                {"success": False, "message": "Professional review not found."},
+                {"success": False, "message": "No pending professional review found for this profile."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 

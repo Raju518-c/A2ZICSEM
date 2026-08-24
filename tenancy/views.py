@@ -1,6 +1,6 @@
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, PolymorphicProxySerializer
 from rest_framework import parsers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -11,6 +11,33 @@ from .serializers import *
 from django.utils import timezone
 from django.db import transaction
 from accounts.models import UserTbl, roles
+
+
+def _single_or_bulk_schema(serializer_class):
+    return PolymorphicProxySerializer(
+        component_name=f"{serializer_class.__name__}SingleOrBulk",
+        serializers=[serializer_class, serializer_class(many=True)],
+        resource_type_field_name=None,
+        many=False,
+    )
+
+
+def _create_serializer(serializer_class, request, tenant_owned=False):
+    """Build a serializer for either one object or a list of objects."""
+    payload = request.data
+    if isinstance(payload, list):
+        data = [item.copy() for item in payload]
+        if tenant_owned:
+            tenant = resolve_tenant(request)
+            for item in data:
+                item["tenant"] = tenant
+        return serializer_class(data=data, many=True)
+
+    data = payload.copy()
+    if tenant_owned:
+        data["tenant"] = resolve_tenant(request)
+    return serializer_class(data=data)
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantCombinedCreateAPIView(APIView):
@@ -289,9 +316,9 @@ class TenantOperationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
     
-    @extend_schema(request=TenantOperationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantOperationSerializer))
     def post(self, request):
-        serializer = TenantOperationSerializer(data=request.data)
+        serializer = _create_serializer(TenantOperationSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -437,9 +464,9 @@ class OrganizationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=OrganizationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(OrganizationSerializer))
     def post(self, request):
-        serializer = OrganizationSerializer(data=request.data)
+        serializer = _create_serializer(OrganizationSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -596,12 +623,9 @@ class TenantLegalEntityListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantLegalEntitySerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantLegalEntitySerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantLegalEntitySerializer(data=data)
+        serializer = _create_serializer(TenantLegalEntitySerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -749,12 +773,9 @@ class TenantTaxRegistrationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantTaxRegistrationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantTaxRegistrationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantTaxRegistrationSerializer(data=data)
+        serializer = _create_serializer(TenantTaxRegistrationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -902,12 +923,9 @@ class TenantDomainListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantDomainSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantDomainSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantDomainSerializer(data=data)
+        serializer = _create_serializer(TenantDomainSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1051,12 +1069,9 @@ class TenantIndustryListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantIndustrySerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantIndustrySerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantIndustrySerializer(data=data)
+        serializer = _create_serializer(TenantIndustrySerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1204,12 +1219,9 @@ class TenantScopeListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantScopeSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantScopeSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantScopeSerializer(data=data)
+        serializer = _create_serializer(TenantScopeSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1357,12 +1369,9 @@ class TenantBusinessUnitListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantBusinessUnitSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantBusinessUnitSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantBusinessUnitSerializer(data=data)
+        serializer = _create_serializer(TenantBusinessUnitSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1510,12 +1519,9 @@ class TenantLocationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantLocationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantLocationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantLocationSerializer(data=data)
+        serializer = _create_serializer(TenantLocationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1658,12 +1664,9 @@ class TenantAuthorisedRepresentativeListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantAuthorisedRepresentativeSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantAuthorisedRepresentativeSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantAuthorisedRepresentativeSerializer(data=data)
+        serializer = _create_serializer(TenantAuthorisedRepresentativeSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1776,12 +1779,9 @@ class TenantContactListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantContactSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantContactSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantContactSerializer(data=data)
+        serializer = _create_serializer(TenantContactSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -1889,12 +1889,9 @@ class TenantVerificationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantVerificationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantVerificationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantVerificationSerializer(data=data)
+        serializer = _create_serializer(TenantVerificationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2008,12 +2005,9 @@ class TenantDocumentListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantDocumentSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantDocumentSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantDocumentSerializer(data=data)
+        serializer = _create_serializer(TenantDocumentSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2121,12 +2115,9 @@ class TenantLegalAcceptanceListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantLegalAcceptanceSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantLegalAcceptanceSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantLegalAcceptanceSerializer(data=data)
+        serializer = _create_serializer(TenantLegalAcceptanceSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2190,12 +2181,9 @@ class TenantLegalSettingsListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantLegalSettingsSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantLegalSettingsSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantLegalSettingsSerializer(data=data)
+        serializer = _create_serializer(TenantLegalSettingsSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2302,12 +2290,9 @@ class TenantNdaListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantNdaSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantNdaSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantNdaSerializer(data=data)
+        serializer = _create_serializer(TenantNdaSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2414,12 +2399,9 @@ class TenantSettingsListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantSettingsSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantSettingsSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantSettingsSerializer(data=data)
+        serializer = _create_serializer(TenantSettingsSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2525,12 +2507,9 @@ class TenantSubscriptionListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantSubscriptionSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantSubscriptionSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantSubscriptionSerializer(data=data)
+        serializer = _create_serializer(TenantSubscriptionSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2594,9 +2573,9 @@ class ModuleListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ModuleSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ModuleSerializer))
     def post(self, request):
-        serializer = ModuleSerializer(data=request.data)
+        serializer = _create_serializer(ModuleSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -2700,12 +2679,9 @@ class TenantModuleEntitlementListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantModuleEntitlementSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantModuleEntitlementSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantModuleEntitlementSerializer(data=data)
+        serializer = _create_serializer(TenantModuleEntitlementSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2813,12 +2789,9 @@ class TenantBrandingListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantBrandingSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantBrandingSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantBrandingSerializer(data=data)
+        serializer = _create_serializer(TenantBrandingSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -2927,12 +2900,9 @@ class TenantReportTemplateListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantReportTemplateSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantReportTemplateSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantReportTemplateSerializer(data=data)
+        serializer = _create_serializer(TenantReportTemplateSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3039,12 +3009,9 @@ class TenantSecuritySettingsListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantSecuritySettingsSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantSecuritySettingsSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantSecuritySettingsSerializer(data=data)
+        serializer = _create_serializer(TenantSecuritySettingsSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3151,9 +3118,9 @@ class TenantIPRestrictionListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantIPRestrictionSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantIPRestrictionSerializer))
     def post(self, request):
-        serializer = TenantIPRestrictionSerializer(data=request.data)
+        serializer = _create_serializer(TenantIPRestrictionSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -3257,12 +3224,9 @@ class TenantIntegrationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantIntegrationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantIntegrationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantIntegrationSerializer(data=data)
+        serializer = _create_serializer(TenantIntegrationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3369,12 +3333,9 @@ class TenantBillingListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantBillingSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantBillingSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantBillingSerializer(data=data)
+        serializer = _create_serializer(TenantBillingSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3480,12 +3441,9 @@ class TenantInvitationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantInvitationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantInvitationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantInvitationSerializer(data=data)
+        serializer = _create_serializer(TenantInvitationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3592,12 +3550,9 @@ class TenantWorkflowListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantWorkflowSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantWorkflowSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantWorkflowSerializer(data=data)
+        serializer = _create_serializer(TenantWorkflowSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3704,9 +3659,9 @@ class TenantWorkflowStepListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantWorkflowStepSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantWorkflowStepSerializer))
     def post(self, request):
-        serializer = TenantWorkflowStepSerializer(data=request.data)
+        serializer = _create_serializer(TenantWorkflowStepSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -3810,12 +3765,9 @@ class TenantOperationLogListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantOperationLogSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantOperationLogSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantOperationLogSerializer(data=data)
+        serializer = _create_serializer(TenantOperationLogSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -3923,12 +3875,9 @@ class TenantTerminologyListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantTerminologySerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantTerminologySerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantTerminologySerializer(data=data)
+        serializer = _create_serializer(TenantTerminologySerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4035,12 +3984,9 @@ class TenantNumberingConfigListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantNumberingConfigSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantNumberingConfigSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantNumberingConfigSerializer(data=data)
+        serializer = _create_serializer(TenantNumberingConfigSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4147,12 +4093,9 @@ class TenantApprovalMatrixListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantApprovalMatrixSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantApprovalMatrixSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantApprovalMatrixSerializer(data=data)
+        serializer = _create_serializer(TenantApprovalMatrixSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4259,12 +4202,9 @@ class TenantNotificationSettingsListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TenantNotificationSettingsSerializer)
+    @extend_schema(request=_single_or_bulk_schema(TenantNotificationSettingsSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = TenantNotificationSettingsSerializer(data=data)
+        serializer = _create_serializer(TenantNotificationSettingsSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4371,12 +4311,9 @@ class ConflictOfInterestDeclarationListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ConflictOfInterestDeclarationSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ConflictOfInterestDeclarationSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = ConflictOfInterestDeclarationSerializer(data=data)
+        serializer = _create_serializer(ConflictOfInterestDeclarationSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4483,12 +4420,9 @@ class DataExportRequestListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=DataExportRequestSerializer)
+    @extend_schema(request=_single_or_bulk_schema(DataExportRequestSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = DataExportRequestSerializer(data=data)
+        serializer = _create_serializer(DataExportRequestSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4596,12 +4530,9 @@ class ProjectListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = ProjectSerializer(data=data)
+        serializer = _create_serializer(ProjectSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -4708,9 +4639,9 @@ class ProjectRequirementListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectRequirementSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectRequirementSerializer))
     def post(self, request):
-        serializer = ProjectRequirementSerializer(data=request.data)
+        serializer = _create_serializer(ProjectRequirementSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -4814,9 +4745,9 @@ class ProjectRequirementScopeListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectRequirementScopeSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectRequirementScopeSerializer))
     def post(self, request):
-        serializer = ProjectRequirementScopeSerializer(data=request.data)
+        serializer = _create_serializer(ProjectRequirementScopeSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -4920,9 +4851,9 @@ class ProjectCandidateListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectCandidateSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectCandidateSerializer))
     def post(self, request):
-        serializer = ProjectCandidateSerializer(data=request.data)
+        serializer = _create_serializer(ProjectCandidateSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -5026,12 +4957,9 @@ class DisclosureRequestListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=DisclosureRequestSerializer)
+    @extend_schema(request=_single_or_bulk_schema(DisclosureRequestSerializer))
     def post(self, request):
-        data = request.data.copy()
-        data["tenant"] = resolve_tenant(request)
-
-        serializer = DisclosureRequestSerializer(data=data)
+        serializer = _create_serializer(DisclosureRequestSerializer, request, tenant_owned=True)
 
         if serializer.is_valid():
             serializer.save()
@@ -5141,9 +5069,9 @@ class CandidateConsentListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=CandidateConsentSerializer)
+    @extend_schema(request=_single_or_bulk_schema(CandidateConsentSerializer))
     def post(self, request):
-        serializer = CandidateConsentSerializer(data=request.data)
+        serializer = _create_serializer(CandidateConsentSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -5207,9 +5135,9 @@ class ProjectPlacementListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectPlacementSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectPlacementSerializer))
     def post(self, request):
-        serializer = ProjectPlacementSerializer(data=request.data)
+        serializer = _create_serializer(ProjectPlacementSerializer, request)
 
         if serializer.is_valid():
             serializer.save()
@@ -5313,9 +5241,9 @@ class ProjectScopeLinkListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=ProjectScopeLinkSerializer)
+    @extend_schema(request=_single_or_bulk_schema(ProjectScopeLinkSerializer))
     def post(self, request):
-        serializer = ProjectScopeLinkSerializer(data=request.data)
+        serializer = _create_serializer(ProjectScopeLinkSerializer, request)
 
         if serializer.is_valid():
             serializer.save()

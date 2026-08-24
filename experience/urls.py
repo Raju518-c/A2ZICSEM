@@ -30,7 +30,7 @@ urlpatterns = [
     ),
 
     path(
-        "project-records/<uuid:pk>/",
+        "project-records/<int:pk>/",
         ProjectRecordRetrieveUpdateDeleteAPIView.as_view(),
         name="project-record-detail",
     ),

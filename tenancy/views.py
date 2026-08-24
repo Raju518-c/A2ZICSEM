@@ -1,6 +1,12 @@
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema, OpenApiParameter, PolymorphicProxySerializer
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiParameter,
+    OpenApiRequest,
+    PolymorphicProxySerializer,
+    extend_schema,
+)
 from rest_framework import parsers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -11,14 +17,61 @@ from .serializers import *
 from django.utils import timezone
 from django.db import transaction
 from accounts.models import UserTbl, roles
+import uuid
+
+
+def _request_example(serializer_class):
+    example = {}
+    serializer = serializer_class()
+    for name, field in serializer.fields.items():
+        if field.read_only:
+            continue
+        field_type = field.__class__.__name__
+        if field_type == "BooleanField":
+            value = False
+        elif field_type in {"IntegerField", "DecimalField", "FloatField"}:
+            value = 0
+        elif field_type == "DateField":
+            value = "2026-01-01"
+        elif field_type == "DateTimeField":
+            value = "2026-01-01T00:00:00Z"
+        elif field_type in {"ListField", "DictField", "JSONField"}:
+            value = [] if field_type == "ListField" else {}
+        elif field_type == "PrimaryKeyRelatedField":
+            value = str(uuid.UUID(int=0)) if field.pk_field.__class__.__name__ == "UUIDField" else 1
+        elif field_type in {"EmailField", "URLField"}:
+            value = "user@example.com" if field_type == "EmailField" else "https://example.com"
+        elif field_type in {"FileField", "ImageField"}:
+            value = "example.pdf" if field_type == "FileField" else "logo.png"
+        elif getattr(field, "choices", None):
+            value = next(iter(field.choices))
+        else:
+            value = "string"
+        example[name] = value
+    return example
 
 
 def _single_or_bulk_schema(serializer_class):
-    return PolymorphicProxySerializer(
-        component_name=f"{serializer_class.__name__}SingleOrBulk",
-        serializers=[serializer_class, serializer_class(many=True)],
-        resource_type_field_name=None,
-        many=False,
+    schema = PolymorphicProxySerializer(
+            component_name=f"{serializer_class.__name__}SingleOrBulk",
+            serializers=[serializer_class, serializer_class(many=True)],
+            resource_type_field_name=None,
+            many=False,
+    )
+    return OpenApiRequest(
+        request=schema,
+        examples=[
+            OpenApiExample(
+                "Single record",
+                value=_request_example(serializer_class),
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Bulk records",
+                value=[_request_example(serializer_class)],
+                request_only=True,
+            ),
+        ],
     )
 
 

@@ -51,7 +51,7 @@ urlpatterns = [
     ),
 
     path(
-        "calculation-rule-sets/<uuid:pk>/",
+        "calculation-rule-sets/<int:pk>/",
         CalculationRuleSetRetrieveUpdateDeleteAPIView.as_view(),
         name="calculation-rule-set-detail",
     ),

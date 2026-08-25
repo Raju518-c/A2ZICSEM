@@ -60,6 +60,7 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
         UNCLASSIFIED = "UNCLASSIFIED", "Unclassified"
         CANDIDATE = "CANDIDATE", "Candidate"
         MENTOR = "MENTOR", "Mentor"
+        Both = "BOTH", "Both"  # For system recommendation only; not a final classification
 
     class ClassificationStatus(models.TextChoices):
         NOT_ASSESSED = "NOT_ASSESSED", "Not assessed"
@@ -368,6 +369,17 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
         blank=True,
         help_text="PPE sizes for mobilisation; restricted PII; never used in resume.",
     )
+    industries_served = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Derived list of ReferenceValue codes (option_set=INDUSTRY) "
+        "from all VERIFIED ProfessionalScope rows; system-managed.",
+    )
+    total_career_experience_months = models.PositiveIntegerField(
+        default=0,
+        help_text="Union-merged calendar experience across all EmploymentRecord "
+        "/ ProjectRecord rows, person-wide; never manually edited.",
+    )
     submitted_at = models.DateTimeField(
         null=True, blank=True, help_text="Stage 2 submission time."
     )
@@ -440,6 +452,7 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
     class Recommendation(models.TextChoices):
         CANDIDATE = "CANDIDATE", "Candidate"
         MENTOR = "MENTOR", "Mentor"
+        BOTH = "BOTH", "Both"  # For system recommendation only; not a final classification
         INSUFFICIENT_DATA = "INSUFFICIENT_DATA", "Insufficient data"
 
     class Classification(models.TextChoices):
@@ -499,6 +512,7 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
         choices=[
             (Classification.CANDIDATE, Classification.CANDIDATE.label),
             (Classification.MENTOR, Classification.MENTOR.label),
+            (Classification.BOTH, Classification.BOTH.label),
         ],
         blank=True,
         help_text="Proposed classification.",
@@ -515,6 +529,7 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
         choices=[
             (Classification.CANDIDATE, Classification.CANDIDATE.label),
             (Classification.MENTOR, Classification.MENTOR.label),
+            (Classification.BOTH, Classification.BOTH.label),
         ],
         blank=True,
         help_text="Final Candidate/Mentor decision; required when APPROVED.",
@@ -603,7 +618,10 @@ class CredentialRecord(TenantOwnedModel, TimeStampedModel, ArchivableModel):
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
         ACTIVE = "ACTIVE", "Active"
+        EXPIRING_SOON = "EXPIRING_SOON", "Expiring soon" # NEW
         EXPIRED = "EXPIRED", "Expired"
+        SUSPENDED = "SUSPENDED", "Suspended" # NEW
+        PENDING_VERIFICATION = "PENDING_VERIFICATION", "Pending verification" # NEW
         REVOKED = "REVOKED", "Revoked"
         ARCHIVED = "ARCHIVED", "Archived"
 

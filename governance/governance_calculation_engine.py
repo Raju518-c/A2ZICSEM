@@ -508,6 +508,36 @@ def _serialize_current_value(target_instance, field_name):
     return current
 
 
+def sync_user_candidate_mentor_flags(professional, classification_value):
+    """Keep accounts.UserTbl.is_candidate/is_mentor in lockstep with
+    ProfessionalProfile.current_classification.
+
+    current_classification is the single field the calculation engine
+    and the override API actually write to (see TARGET_FIELD_NAME). The
+    boolean pair on UserTbl is a separate table/row and nothing was ever
+    setting it, so it silently stayed at its default (False, False) no
+    matter what the classification engine concluded.
+
+    A professional can be both a candidate and a mentor at once
+    (Classification.BOTH), so this is two independent booleans, not one
+    flag flip — CANDIDATE/MENTOR/BOTH/UNCLASSIFIED all map to a distinct
+    (is_candidate, is_mentor) pair.
+    """
+    user = professional.user
+    is_candidate = classification_value in (
+        ProfessionalProfile.Classification.CANDIDATE,
+        ProfessionalProfile.Classification.Both,
+    )
+    is_mentor = classification_value in (
+        ProfessionalProfile.Classification.MENTOR,
+        ProfessionalProfile.Classification.Both,
+    )
+    if user.is_candidate != is_candidate or user.is_mentor != is_mentor:
+        user.is_candidate = is_candidate
+        user.is_mentor = is_mentor
+        user.save(update_fields=["is_candidate", "is_mentor"])
+
+
 def apply_calculated_value(
     *,
     tenant,
@@ -529,6 +559,14 @@ def apply_calculated_value(
     if hasattr(target_instance, "last_recalculated_at") and change_source == "SYSTEM_RECALCULATION":
         target_instance.last_recalculated_at = timezone.now()
     target_instance.save()
+
+    # CANDIDATE_MENTOR_CLASSIFICATION only ever wrote current_classification
+    # on ProfessionalProfile; it never touched accounts.UserTbl.is_candidate/
+    # is_mentor, which is why those flags never moved from either the
+    # system calculate API or an approved override. Sync them here so both
+    # call sites (calculate + override-approve) stay covered from one place.
+    if calculation_field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
+        sync_user_candidate_mentor_flags(professional, resolved_value)
 
     history = CalculatedFieldValueHistory.objects.create(
         tenant=tenant,

@@ -55,6 +55,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://145.79.0.94:82",
     "http://localhost:3000",
     "http://*.localhost:3000",
+    "http://localhost:5173",
+    "http://*.localhost:5173",
     "http://qualion.com",
     "https://qualion.com",
     "https://*.qualion.com",
@@ -313,10 +315,12 @@ CORS_ALLOWED_ORIGINS = env_list(
     [
         "http://localhost:3000",
         "http://145.79.0.94:83",
+        "http://localhost:5173",            
     ]
 )
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https?://localhost:3000$",
+    r"^https?://localhost:5173$",
     r"^https?://([a-z0-9-]+\.)?qualion\.com$",
     r"^https?://145\.79\.0\.94:83$",
 ]

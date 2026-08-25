@@ -13,7 +13,7 @@ from django.db.models import Q
 from core.choices import VerificationStatus
 from core.models import CreatedOnlyModel, TenantOwnedModel, TimeStampedModel
 
-
+  
 class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     """Current competency summary for one Professional + Scope. Holds
     calculated experience and the current L0-L5/authority result.
@@ -22,7 +22,13 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     system-managed. Level is never assigned from years alone and changes
     require an approved CompetencyAssessment.
     """
-
+        
+    class DeployabilityStatus(models.TextChoices):
+        DEPLOYABLE = "DEPLOYABLE", "Deployable"
+        DEPLOYABLE_WITH_RESTRICTIONS = "DEPLOYABLE_WITH_RESTRICTIONS", "Deployable with restrictions"
+        REVIEW_REQUIRED = "REVIEW_REQUIRED", "Review required"
+        NOT_DEPLOYABLE = "NOT_DEPLOYABLE", "Not deployable"
+        
     professional = models.ForeignKey(
         "professionals.ProfessionalProfile",
         on_delete=models.CASCADE,
@@ -71,10 +77,30 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
         help_text="Current permitted authority for this scope; option_set "
         "must be AUTHORITY_STATUS; default Observer.",
     )
-    is_deployable = models.BooleanField(
-        default=False,
+    verified_project_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Count of distinct VERIFIED ProjectScope rows for "
+        "this professional+scope; system-managed, never manually edited."
+    )
+    highest_authority_reached = models.ForeignKey(
+        "catalog.ReferenceValue",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="professional_scopes_highest_authority",
+        help_text="Highest AUTHORITY_STATUS ever approved for this scope; "
+        "never decreases, unlike current_authority_status.",
+        )
+    is_deployable = models.CharField(
+        max_length=30,
+        choices=DeployabilityStatus.choices,
+        default=DeployabilityStatus.NOT_DEPLOYABLE,
         help_text="Derived from level, authority, valid credentials and compliance.",
     )
+    # is_deployable = models.BooleanField(
+    #     default=False,
+    #     help_text="Derived from level, authority, valid credentials and compliance.",
+    # )
     verification_status = models.CharField(
         max_length=30,
         choices=VerificationStatus.choices,

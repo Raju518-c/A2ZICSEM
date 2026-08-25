@@ -459,6 +459,7 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
         UNCLASSIFIED = "UNCLASSIFIED", "Unclassified"
         CANDIDATE = "CANDIDATE", "Candidate"
         MENTOR = "MENTOR", "Mentor"
+        BOTH = "BOTH", "Both"  # For system recommendation only; not a final classification
 
     class Decision(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -529,7 +530,6 @@ class ProfessionalReview(TenantOwnedModel, CreatedOnlyModel):
         choices=[
             (Classification.CANDIDATE, Classification.CANDIDATE.label),
             (Classification.MENTOR, Classification.MENTOR.label),
-            (Classification.BOTH, Classification.BOTH.label),
         ],
         blank=True,
         help_text="Final Candidate/Mentor decision; required when APPROVED.",

@@ -33,10 +33,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='evidencedocument',
-            constraint=models.CheckConstraint(condition=models.Q(('issue_date__isnull', True), ('expiry_date__isnull', True), ('issue_date__lte', models.F('expiry_date')), _connector='OR'), name='chk_evidence_document_issue_before_expiry'),
+            constraint=models.CheckConstraint(check=models.Q(('issue_date__isnull', True), ('expiry_date__isnull', True), ('issue_date__lte', models.F('expiry_date')), _connector='OR'), name='chk_evidence_document_issue_before_expiry'),
         ),
         migrations.AddConstraint(
             model_name='evidencedocument',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_evidence_document_verified_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_evidence_document_verified_at_required'),
         ),
     ]

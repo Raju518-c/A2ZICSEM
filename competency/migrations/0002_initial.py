@@ -42,38 +42,38 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(('technical_knowledge_score__gte', 0), ('technical_knowledge_score__lte', 100)), name='chk_competency_assessment_technical_score_range'),
+            constraint=models.CheckConstraint(check=models.Q(('technical_knowledge_score__gte', 0), ('technical_knowledge_score__lte', 100)), name='chk_competency_assessment_technical_score_range'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(('field_execution_score__gte', 0), ('field_execution_score__lte', 100)), name='chk_competency_assessment_field_execution_score_range'),
+            constraint=models.CheckConstraint(check=models.Q(('field_execution_score__gte', 0), ('field_execution_score__lte', 100)), name='chk_competency_assessment_field_execution_score_range'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(('documentation_evidence_score__gte', 0), ('documentation_evidence_score__lte', 100)), name='chk_competency_assessment_documentation_score_range'),
+            constraint=models.CheckConstraint(check=models.Q(('documentation_evidence_score__gte', 0), ('documentation_evidence_score__lte', 100)), name='chk_competency_assessment_documentation_score_range'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(('ethics_independence_score__gte', 0), ('ethics_independence_score__lte', 100)), name='chk_competency_assessment_ethics_score_range'),
+            constraint=models.CheckConstraint(check=models.Q(('ethics_independence_score__gte', 0), ('ethics_independence_score__lte', 100)), name='chk_competency_assessment_ethics_score_range'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(('communication_conduct_score__gte', 0), ('communication_conduct_score__lte', 100)), name='chk_competency_assessment_communication_score_range'),
+            constraint=models.CheckConstraint(check=models.Q(('communication_conduct_score__gte', 0), ('communication_conduct_score__lte', 100)), name='chk_competency_assessment_communication_score_range'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_level__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_level_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_level__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_level_required'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_authority__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_authority_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_authority__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_authority_required'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'REJECTED'), _negated=True), models.Q(('decision_reason', ''), _negated=True), _connector='OR'), name='chk_competency_assessment_decision_reason_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'REJECTED'), _negated=True), models.Q(('decision_reason', ''), _negated=True), _connector='OR'), name='chk_competency_assessment_decision_reason_required'),
         ),
         migrations.AddConstraint(
             model_name='competencyassessment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision__in', ['APPROVED', 'REJECTED']), _negated=True), ('approved_at__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision__in', ['APPROVED', 'REJECTED']), _negated=True), ('approved_at__isnull', False), _connector='OR'), name='chk_competency_assessment_approved_at_required'),
         ),
     ]

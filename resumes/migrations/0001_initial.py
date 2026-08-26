@@ -80,18 +80,18 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='resumetemplate',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_resume_template_published_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_resume_template_published_at_required'),
         ),
         migrations.AddConstraint(
             model_name='resumetemplate',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_resume_template_retired_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_resume_template_retired_at_required'),
         ),
         migrations.AddConstraint(
             model_name='resumegeneration',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'APPROVED'), _negated=True), ('reviewed_at__isnull', False), _connector='OR'), name='chk_resume_generation_reviewed_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'APPROVED'), _negated=True), ('reviewed_at__isnull', False), _connector='OR'), name='chk_resume_generation_reviewed_at_required'),
         ),
         migrations.AddConstraint(
             model_name='resumegeneration',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'SUBMITTED'), _negated=True), ('submitted_at__isnull', False), _connector='OR'), name='chk_resume_generation_submitted_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'SUBMITTED'), _negated=True), ('submitted_at__isnull', False), _connector='OR'), name='chk_resume_generation_submitted_at_required'),
         ),
     ]

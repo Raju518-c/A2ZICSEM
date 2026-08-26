@@ -119,30 +119,30 @@ class Tenant(UUIDModel, TimeStampedModel):
 
     # --- System Identity ---
     name = models.CharField(
-        max_length=200, validators=[MinLengthValidator(2)],
+        max_length=200, null=True, blank=True, validators=[MinLengthValidator(2)],
         help_text="Tenant display name.",
     )  # Internal display name used across the platform UI.
 
     code = models.CharField(
-        max_length=50, unique=True, validators=[validate_uppercase_code],
+        max_length=50, unique=True, null=True, blank=True, validators=[validate_uppercase_code],
         help_text="tenant.tenant_code — stable internal reference, never the company name.",
     )  # sheet 16: tenant.tenant_code. Human-readable reference like QTN-000123. Never changes, even if the company renames itself.
 
     workspace_type = models.CharField(
-        max_length=20, choices=WorkspaceType.choices,
+        max_length=20, choices=WorkspaceType.choices, null=True, blank=True,
         help_text="tenant.workspace_type — personal workspaces get no organisational privileges.",
     )  # sheet 16: tenant.workspace_type. Set once at creation.
 
     # --- Organisation Identity ---
     legal_name = models.CharField(
-        max_length=250, blank=True,
+        max_length=250, null=True, blank=True,
         help_text="Registered legal name, when different from display name.",
     )  # sheet 16: tenant.legal_name. The company's official registered name — comes from registration evidence.
 
-    trade_name = models.CharField(max_length=200, blank=True)
+    trade_name = models.CharField(max_length=200, null=True, blank=True)
     # sheet 16: tenant.trade_name. The name they actually go by day-to-day, if different from the legal name.
 
-    organisation_type = models.CharField(max_length=30, choices=OrganisationType.choices)
+    organisation_type = models.CharField(max_length=30, choices=OrganisationType.choices, null=True, blank=True)
     # sheet 16: tenant.organisation_type. Self-declared at application, may be corrected by the reviewer.
 
     parent_tenant = models.ForeignKey(
@@ -150,10 +150,10 @@ class Tenant(UUIDModel, TimeStampedModel):
         help_text="tenant.parent_tenant_id — group hierarchy.",
     )  # sheet 16: tenant.parent_tenant_id. If this tenant is part of a bigger group, which tenant owns it. Platform Admin sets this, not the tenant itself.
 
-    description = models.TextField(blank=True, help_text="Max 2000 chars per blueprint.")
+    description = models.TextField(blank=True, null=True, help_text="Max 2000 chars per blueprint.")
     # sheet 16: tenant.description. A short "about us" paragraph.
 
-    website = models.URLField(max_length=500, blank=True)
+    website = models.URLField(max_length=500, null=True, blank=True)
     # sheet 16: tenant.website. Verified against domain/website ownership where possible.
 
     # --- Industry / Service Profile ---
@@ -165,16 +165,16 @@ class Tenant(UUIDModel, TimeStampedModel):
     # at the serializer/service layer — same pattern professional_profiles.additional_role_codes
     # already uses elsewhere in this codebase, not enforced via a join table.
 
-    industry_ids = models.JSONField(default=list, blank=True, help_text="tenant.industry_ids — list of catalog.ReferenceValue codes (option_type=INDUSTRY).")
+    industry_ids = models.JSONField(default=list, null=True, blank=True, help_text="tenant.industry_ids — list of catalog.ReferenceValue codes (option_type=INDUSTRY).")
     # sheet 16: tenant.industry_ids. Required field. What industries the tenant declares serving —
     # filters which modules/projects the tenant sees. NOT the same as TenantOperation, which is a
     # per-country registration permission (different table, different purpose — see its docstring).
 
-    service_scope_ids = models.JSONField(default=list, blank=True, help_text="tenant.service_scope_ids — list of catalog.ScopeCatalog codes.")
+    service_scope_ids = models.JSONField(default=list, null=True, blank=True, help_text="tenant.service_scope_ids — list of catalog.ScopeCatalog codes.")
     # sheet 16: tenant.service_scope_ids. Optional. Which specific scopes/services the tenant offers.
 
     # --- Platform access (pre-existing, not in the blueprint but required for the app to function) ---
-    portal_slug = models.SlugField(max_length=80, unique=True, validators=[validate_lowercase_slug])
+    portal_slug = models.SlugField(max_length=80, null=True, blank=True, unique=True, validators=[validate_lowercase_slug])
     # The URL segment this tenant's users log in through, e.g. qualion.com/<slug>/login.
 
     custom_domain = models.CharField(max_length=255, unique=True, null=True, blank=True)
@@ -189,22 +189,22 @@ class Tenant(UUIDModel, TimeStampedModel):
     login_enabled = models.BooleanField(default=True)
     # Kill switch: when false, nobody can log into this tenant, even if status=ACTIVE. Used for emergency lockouts.
 
-    default_timezone = models.CharField(max_length=64, validators=[validate_iana_timezone])
+    default_timezone = models.CharField(max_length=64, null=True, blank=True, validators=[validate_iana_timezone])
     # sheet 16: tenant.default_time_zone. IANA timezone string, e.g. "Asia/Kolkata". Drives scheduling/logs.
 
-    default_currency = models.CharField(max_length=3, validators=[validate_iso_currency_code])
+    default_currency = models.CharField(max_length=3, null=True, blank=True, validators=[validate_iso_currency_code])
     # sheet 16: tenant.default_currency. ISO 4217 code, e.g. "USD". Used across all commercial fields.
 
-    contact_email = models.EmailField(max_length=254, blank=True)
+    contact_email = models.EmailField(max_length=254, null=True, blank=True)
     # General-purpose contact email for the tenant as a whole (distinct from the specific TenantContact rows).
 
-    contact_phone = models.CharField(max_length=20, blank=True, validators=[validate_e164_phone])
+    contact_phone = models.CharField(max_length=20, null=True, blank=True, validators=[validate_e164_phone])
     # General-purpose contact phone, E.164 format.
 
-    settings = models.JSONField(default=dict, blank=True)
+    settings = models.JSONField(default=dict, null=True, blank=True)
     # Free-form feature-flag bag for platform-internal use — not part of the sheet 16 field list.
 
-    branding = models.JSONField(default=dict, blank=True)
+    branding = models.JSONField(default=dict, null=True, blank=True)
     # Legacy/simple branding cache — TenantBranding (section 9) is the structured, authoritative version.
 
     logo = models.ImageField(
@@ -214,11 +214,11 @@ class Tenant(UUIDModel, TimeStampedModel):
 
     # --- Status & Audit ---
     status_reason = models.TextField(
-        blank=True,
+        blank=True, null=True,
         help_text="Required when status changes to RESTRICTED/SUSPENDED/ARCHIVED/CLOSED — enforce in serializer/service layer.",
     )  # sheet 16: tenant.status_reason. Why the status last changed. Filled by whoever's authorised to make that change.
 
-    created_by = models.ForeignKey("accounts.UserTbl", on_delete=models.PROTECT, related_name="tenants_created")
+    created_by = models.ForeignKey("accounts.UserTbl", null=True, blank=True, on_delete=models.PROTECT, related_name="tenants_created")
     # sheet 16: tenant.created_by. The founding UserTbl row is created in the SAME request as this
     # Tenant row (TENANT_SUBMIT) — accounts.UserTbl.tenant is required, so the user can't exist
     # before this tenant does. See TenantVerification for the approval sequencing that activates
@@ -282,10 +282,10 @@ class TenantOperation(TimeStampedModel):
     industry = models.ForeignKey("catalog.ReferenceValue", on_delete=models.PROTECT, related_name="tenant_operations", db_index=True)
     # Which industry (from the shared lookup table) this row declares. Same table Organization.industry uses.
 
-    country_code = models.CharField(max_length=2, validators=[validate_iso_country_code])
+    country_code = models.CharField(max_length=2, null=True, blank=True, validators=[validate_iso_country_code])
     # Required — every operating permission is a specific industry+country pair.
 
-    region_name = models.CharField(max_length=120, blank=True)
+    region_name = models.CharField(max_length=120, null=True, blank=True)
     # Optional state/province/region qualifier within the country.
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -305,7 +305,7 @@ class TenantOperation(TimeStampedModel):
     # Optional validity window for this operating permission.
 
     requested_by = models.ForeignKey(
-        "accounts.UserTbl", on_delete=models.PROTECT, related_name="tenant_operations_requested",
+        "accounts.UserTbl", null=True, blank=True, on_delete=models.PROTECT, related_name="tenant_operations_requested",
     )  # The tenant's own Organisation Admin — NOT Platform Super Admin. This is the field that
     # was previously named `created_by` with an incorrect "must be Platform Super Admin" rule.
 
@@ -374,13 +374,13 @@ class Organization(UUIDModel, TimeStampedModel):
     parent = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="children")
     # Enables a real hierarchy — e.g. a Branch under a Department under an Operating Unit.
 
-    organization_type = models.CharField(max_length=40, choices=OrganizationType.choices)
+    organization_type = models.CharField(max_length=40, null=True, blank=True, choices=OrganizationType.choices)
     # The discriminator that decides which "kind" of Organization row this is.
 
-    name = models.CharField(max_length=200, validators=[MinLengthValidator(2)])
+    name = models.CharField(max_length=200, null=True, blank=True, validators=[MinLengthValidator(2)])
     # Display name — the branch/department/client's name.
 
-    legal_name = models.CharField(max_length=250, blank=True)
+    legal_name = models.CharField(max_length=250, null=True, blank=True)
     # Legal name, if different from the display name (mainly relevant for external orgs like clients).
 
     code = models.CharField(max_length=60, blank=True, null=True)
@@ -389,18 +389,18 @@ class Organization(UUIDModel, TimeStampedModel):
     industry = models.ForeignKey("catalog.ReferenceValue", on_delete=models.PROTECT, null=True, blank=True, related_name="organizations")
     # Which industry this organisation is primarily associated with, if relevant.
 
-    country_code = models.CharField(max_length=2, blank=True, validators=[validate_iso_country_code])
-    city = models.CharField(max_length=120, blank=True)
+    country_code = models.CharField(max_length=2, null=True, blank=True, validators=[validate_iso_country_code])
+    city = models.CharField(max_length=120, null=True, blank=True)
     # Basic location info — not a full structured address (see TenantLocation for that).
 
-    website = models.URLField(max_length=500, blank=True)
-    email = models.EmailField(max_length=254, blank=True)
+    website = models.URLField(max_length=500, null=True, blank=True)
+    email = models.EmailField(max_length=254, null=True, blank=True)
     # Contact info for this organisation.
 
     external_reference = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     # ID from an external system this record was imported from, if any.
 
-    metadata = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(default=dict, null=True, blank=True)
     # Free-form extra attributes that don't warrant their own column.
 
     is_active = models.BooleanField(default=True)
@@ -476,7 +476,7 @@ class TenantLegalEntity(UUIDModel, TenantOwnedModel, TimeStampedModel):
     # application. Flipped to ACTIVE either automatically (founding entity, at TENANT_APPROVE
     # time) or via explicit review (any entity added afterward).
 
-    requested_by = models.ForeignKey("accounts.UserTbl", on_delete=models.PROTECT, related_name="legal_entities_requested")
+    requested_by = models.ForeignKey("accounts.UserTbl", null=True, blank=True, on_delete=models.PROTECT, related_name="legal_entities_requested")
     # The Organisation Admin who added this entity — for the founding entity, this is the applicant.
 
     reviewed_by = models.ForeignKey("accounts.UserTbl", on_delete=models.SET_NULL, null=True, blank=True, related_name="legal_entities_reviewed")
@@ -906,7 +906,7 @@ class TenantSettings(TenantOwnedModel):
     is only for the remaining localisation fields sheet 19 lists as a
     separate object."""
 
-    tenant = models.OneToOneField(Tenant, on_delete=models.PROTECT, related_name="settings")
+    tenant = models.OneToOneField(Tenant, on_delete=models.PROTECT, related_name="tenant_settings")
 
     default_language = models.CharField(max_length=10, default="en")
     # sheet 16: tenant.default_language.
@@ -1024,7 +1024,7 @@ class TenantModuleEntitlement(TenantOwnedModel, TimeStampedModel):
 class TenantBranding(TenantOwnedModel):
     """1:1 with tenant — the tenant's branded-output configuration."""
 
-    tenant = models.OneToOneField(Tenant, on_delete=models.PROTECT, related_name="branding")
+    tenant = models.OneToOneField(Tenant, on_delete=models.PROTECT, related_name="tenant_branding")
 
     logo = models.ImageField(
         upload_to="tenant_branding/logos/", max_length=1000, null=True, blank=True,
@@ -1196,13 +1196,13 @@ class TenantRoleAssignment(UUIDModel):
     for who granted it — detail accounts.UserTbl.role (a plain M2M)
     can't express on its own."""
 
-    user = models.ForeignKey("accounts.UserTbl", on_delete=models.CASCADE, related_name="tenant_role_assignments")
+    user = models.ForeignKey("accounts.UserTbl", null=True, blank=True, on_delete=models.CASCADE, related_name="tenant_role_assignments")
     # The user this role applies to. Their tenant is user.tenant — not repeated here.
 
     role = models.ForeignKey("accounts.roles", on_delete=models.PROTECT, related_name="tenant_assignments")
     # The actual role table (sheet 18's 10 roles). NOT accounts.RoleCode — that's a TextChoices enum, not a table.
 
-    granted_by = models.ForeignKey("accounts.UserTbl", on_delete=models.PROTECT, related_name="tenant_roles_granted")
+    granted_by = models.ForeignKey("accounts.UserTbl", null=True, blank=True, on_delete=models.PROTECT, related_name="tenant_roles_granted")
     # Who granted this role.
 
     effective_from = models.DateField(null=True, blank=True)
@@ -1500,7 +1500,7 @@ class ProjectMembership(models.Model):
     ProjectPlacement below, which is the external candidate's placement."""
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="memberships")
-    user = models.ForeignKey("accounts.UserTbl", on_delete=models.CASCADE, related_name="project_memberships")
+    user = models.ForeignKey("accounts.UserTbl", null=True, blank=True, on_delete=models.CASCADE, related_name="project_memberships")
     # Which tenant staff member, on which project.
 
     role = models.ForeignKey("accounts.roles", on_delete=models.PROTECT, related_name="project_memberships")

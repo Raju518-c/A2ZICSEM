@@ -48,17 +48,17 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='tenant',
             name='parent_tenant',
-            field=models.ForeignKey(blank=True, help_text='tenant.parent_tenant_id — group hierarchy.', null=True, on_delete=django.db.models.deletion.PROTECT, related_name='child_tenants', to='tenancy.tenant'),
+            field=models.ForeignKey(blank=True, help_text='tenant.parent_tenant_id â€” group hierarchy.', null=True, on_delete=django.db.models.deletion.PROTECT, related_name='child_tenants', to='tenancy.tenant'),
         ),
         migrations.AddField(
             model_name='tenant',
             name='service_scope_ids',
-            field=models.JSONField(blank=True, default=list, help_text='tenant.service_scope_ids cache — see TenantScope for the authoritative rows.', null=True),
+            field=models.JSONField(blank=True, default=list, help_text='tenant.service_scope_ids cache â€” see TenantScope for the authoritative rows.', null=True),
         ),
         migrations.AddField(
             model_name='tenant',
             name='status_reason',
-            field=models.TextField(blank=True, help_text='Required when status changes to RESTRICTED/SUSPENDED/ARCHIVED/CLOSED — enforce in serializer/service layer.', null=True),
+            field=models.TextField(blank=True, help_text='Required when status changes to RESTRICTED/SUSPENDED/ARCHIVED/CLOSED â€” enforce in serializer/service layer.', null=True),
         ),
         migrations.AddField(
             model_name='tenant',
@@ -73,7 +73,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='tenant',
             name='workspace_type',
-            field=models.CharField(blank=True, choices=[('ORGANISATION', 'Organisation tenant'), ('PERSONAL', 'Personal workspace')], help_text='tenant.workspace_type — personal workspaces get no organisational privileges.', max_length=20, null=True),
+            field=models.CharField(blank=True, choices=[('ORGANISATION', 'Organisation tenant'), ('PERSONAL', 'Personal workspace')], help_text='tenant.workspace_type â€” personal workspaces get no organisational privileges.', max_length=20, null=True),
         ),
         migrations.AlterField(
             model_name='organization',
@@ -191,6 +191,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='tenantoperation',
-            constraint=models.CheckConstraint(condition=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_tenant_operation_dates'),
+            constraint=models.CheckConstraint(check=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_tenant_operation_dates'),
         ),
     ]

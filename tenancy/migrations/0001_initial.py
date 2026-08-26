@@ -100,7 +100,7 @@ class Migration(migrations.Migration):
                 'verbose_name_plural': 'Tenant Operations',
                 'db_table': 'tenancy_tenant_operation',
                 'ordering': ['tenant', 'industry', 'country_code'],
-                'constraints': [models.UniqueConstraint(fields=('tenant', 'industry', 'country_code'), name='uniq_tenant_operation_tenant_industry_country'), models.CheckConstraint(condition=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_tenant_operation_effective_from_before_to')],
+                'constraints': [models.UniqueConstraint(fields=('tenant', 'industry', 'country_code'), name='uniq_tenant_operation_tenant_industry_country'), models.CheckConstraint(check=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_tenant_operation_effective_from_before_to')],
             },
         ),
     ]

@@ -180,8 +180,8 @@ class Migration(migrations.Migration):
                 ('consent_given', models.BooleanField(default=False, help_text='Must be true before reference details can be shared.')),
                 ('consent_given_at', models.DateTimeField(blank=True, help_text='Required when consent_given=true.', null=True)),
                 ('verification_status', models.CharField(choices=[('SELF_DECLARED', 'Self declared'), ('EVIDENCE_UPLOADED', 'Evidence uploaded'), ('PENDING_REVIEW', 'Pending review'), ('UNDER_REVIEW', 'Under review'), ('VERIFIED', 'Verified'), ('VALIDATED', 'Validated'), ('REJECTED', 'Rejected'), ('EXPIRED', 'Expired')], default='SELF_DECLARED', help_text='Verification state.', max_length=30)),
-                ('resume_visibility', models.CharField(choices=[('NEVER', 'Never'), ('ALWAYS', 'Always'), ('OPTIONAL', 'Optional'), ('CLIENT_SPECIFIC', 'Client specific')], help_text='Resume inclusion rule. Reference default=CLIENT_SPECIFIC; emergency=NEVER — set explicitly per contact_type.', max_length=30)),
-                ('data_classification', models.CharField(choices=[('PUBLIC', 'Public'), ('PROFESSIONAL', 'Professional'), ('SENSITIVE_PII', 'Sensitive PII'), ('RESTRICTED_PII', 'Restricted PII'), ('COMMERCIAL', 'Commercial'), ('HEALTH', 'Health')], help_text='Privacy classification. Reference=SENSITIVE_PII; emergency=RESTRICTED_PII — set explicitly per contact_type.', max_length=30)),
+                ('resume_visibility', models.CharField(choices=[('NEVER', 'Never'), ('ALWAYS', 'Always'), ('OPTIONAL', 'Optional'), ('CLIENT_SPECIFIC', 'Client specific')], help_text='Resume inclusion rule. Reference default=CLIENT_SPECIFIC; emergency=NEVER â€” set explicitly per contact_type.', max_length=30)),
+                ('data_classification', models.CharField(choices=[('PUBLIC', 'Public'), ('PROFESSIONAL', 'Professional'), ('SENSITIVE_PII', 'Sensitive PII'), ('RESTRICTED_PII', 'Restricted PII'), ('COMMERCIAL', 'Commercial'), ('HEALTH', 'Health')], help_text='Privacy classification. Reference=SENSITIVE_PII; emergency=RESTRICTED_PII â€” set explicitly per contact_type.', max_length=30)),
                 ('organization', models.ForeignKey(blank=True, help_text='Structured organisation reference.', null=True, on_delete=django.db.models.deletion.PROTECT, related_name='contact_records', to='tenancy.organization')),
                 ('tenant', models.ForeignKey(help_text='Tenant that owns this record. Server-derived; never trusted from client payload.', on_delete=django.db.models.deletion.PROTECT, related_name='%(app_label)s_%(class)s_set', to='tenancy.tenant')),
                 ('professional', models.ForeignKey(help_text='Professional who owns the contact.', on_delete=django.db.models.deletion.CASCADE, related_name='contacts', to='professionals.professionalprofile')),
@@ -261,74 +261,74 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(('completion_percent__gte', 0), ('completion_percent__lte', 100)), name='chk_professional_profile_completion_percent_range'),
+            constraint=models.CheckConstraint(check=models.Q(('completion_percent__gte', 0), ('completion_percent__lte', 100)), name='chk_professional_profile_completion_percent_range'),
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(('notice_period_days__isnull', True), models.Q(('notice_period_days__gte', 0), ('notice_period_days__lte', 365)), _connector='OR'), name='chk_professional_profile_notice_period_range'),
+            constraint=models.CheckConstraint(check=models.Q(('notice_period_days__isnull', True), models.Q(('notice_period_days__gte', 0), ('notice_period_days__lte', 365)), _connector='OR'), name='chk_professional_profile_notice_period_range'),
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(('expected_rate__isnull', True), models.Q(('rate_currency', ''), _negated=True), _connector='OR'), name='chk_professional_profile_rate_currency_required'),
+            constraint=models.CheckConstraint(check=models.Q(('expected_rate__isnull', True), models.Q(('rate_currency', ''), _negated=True), _connector='OR'), name='chk_professional_profile_rate_currency_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('address_line_1', ''), ('address_line_2', ''), ('postal_code', '')), models.Q(('address_country_code', ''), _negated=True), _connector='OR'), name='chk_professional_profile_address_country_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('address_line_1', ''), ('address_line_2', ''), ('postal_code', '')), models.Q(('address_country_code', ''), _negated=True), _connector='OR'), name='chk_professional_profile_address_country_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('classification_status', 'CONFIRMED'), _negated=True), ('classified_at__isnull', False), _connector='OR'), name='chk_professional_profile_classified_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('classification_status', 'CONFIRMED'), _negated=True), ('classified_at__isnull', False), _connector='OR'), name='chk_professional_profile_classified_at_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalprofile',
-            constraint=models.CheckConstraint(condition=models.Q(('classified_by', models.F('user')), _negated=True), name='chk_professional_profile_classified_by_not_owner'),
+            constraint=models.CheckConstraint(check=models.Q(('classified_by', models.F('user')), _negated=True), name='chk_professional_profile_classified_by_not_owner'),
         ),
         migrations.AddConstraint(
             model_name='credentialrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('start_date__isnull', True), ('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_credential_record_start_before_end'),
+            constraint=models.CheckConstraint(check=models.Q(('start_date__isnull', True), ('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_credential_record_start_before_end'),
         ),
         migrations.AddConstraint(
             model_name='credentialrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('issue_date__isnull', True), ('expiry_date__isnull', True), ('issue_date__lte', models.F('expiry_date')), _connector='OR'), name='chk_credential_record_issue_before_expiry'),
+            constraint=models.CheckConstraint(check=models.Q(('issue_date__isnull', True), ('expiry_date__isnull', True), ('issue_date__lte', models.F('expiry_date')), _connector='OR'), name='chk_credential_record_issue_before_expiry'),
         ),
         migrations.AddConstraint(
             model_name='credentialrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('issuing_organization__isnull', False), models.Q(('issuing_body_snapshot', ''), _negated=True), _connector='OR'), name='chk_credential_record_issuing_body_required'),
+            constraint=models.CheckConstraint(check=models.Q(('issuing_organization__isnull', False), models.Q(('issuing_body_snapshot', ''), _negated=True), _connector='OR'), name='chk_credential_record_issuing_body_required'),
         ),
         migrations.AddConstraint(
             model_name='contactrecord',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('email', ''), _negated=True), models.Q(('phone', ''), _negated=True), _connector='OR'), name='chk_contact_record_email_or_phone_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('email', ''), _negated=True), models.Q(('phone', ''), _negated=True), _connector='OR'), name='chk_contact_record_email_or_phone_required'),
         ),
         migrations.AddConstraint(
             model_name='contactrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('consent_given', False), ('consent_given_at__isnull', False), _connector='OR'), name='chk_contact_record_consent_given_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(('consent_given', False), ('consent_given_at__isnull', False), _connector='OR'), name='chk_contact_record_consent_given_at_required'),
         ),
         migrations.AddConstraint(
             model_name='capabilityrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('reference_value__isnull', False), models.Q(('custom_name', ''), _negated=True), _connector='OR'), name='chk_capability_record_custom_name_required'),
+            constraint=models.CheckConstraint(check=models.Q(('reference_value__isnull', False), models.Q(('custom_name', ''), _negated=True), _connector='OR'), name='chk_capability_record_custom_name_required'),
         ),
         migrations.AddConstraint(
             model_name='capabilityrecord',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('capability_type', 'LANGUAGE'), _negated=True), models.Q(models.Q(('speaking_level', ''), _negated=True), models.Q(('reading_level', ''), _negated=True), models.Q(('writing_level', ''), _negated=True)), _connector='OR'), name='chk_capability_record_language_levels_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('capability_type', 'LANGUAGE'), _negated=True), models.Q(models.Q(('speaking_level', ''), _negated=True), models.Q(('reading_level', ''), _negated=True), models.Q(('writing_level', ''), _negated=True)), _connector='OR'), name='chk_capability_record_language_levels_required'),
         ),
         migrations.AddConstraint(
             model_name='capabilityrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('years_experience__isnull', True), ('years_experience__gte', 0), _connector='OR'), name='chk_capability_record_years_experience_non_negative'),
+            constraint=models.CheckConstraint(check=models.Q(('years_experience__isnull', True), ('years_experience__gte', 0), _connector='OR'), name='chk_capability_record_years_experience_non_negative'),
         ),
         migrations.AddConstraint(
             model_name='professionalreview',
-            constraint=models.CheckConstraint(condition=models.Q(('system_recommendation', ''), ('system_confidence__isnull', False), _connector='OR'), name='chk_professional_review_system_confidence_required'),
+            constraint=models.CheckConstraint(check=models.Q(('system_recommendation', ''), ('system_confidence__isnull', False), _connector='OR'), name='chk_professional_review_system_confidence_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalreview',
-            constraint=models.CheckConstraint(condition=models.Q(('system_recommendation', ''), models.Q(('ruleset_version', ''), _negated=True), _connector='OR'), name='chk_professional_review_ruleset_version_required'),
+            constraint=models.CheckConstraint(check=models.Q(('system_recommendation', ''), models.Q(('ruleset_version', ''), _negated=True), _connector='OR'), name='chk_professional_review_ruleset_version_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalreview',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), models.Q(('final_classification', ''), _negated=True), _connector='OR'), name='chk_professional_review_final_classification_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), models.Q(('final_classification', ''), _negated=True), _connector='OR'), name='chk_professional_review_final_classification_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalreview',
-            constraint=models.CheckConstraint(condition=models.Q(('decision', 'PENDING'), ('decided_at__isnull', False), _connector='OR'), name='chk_professional_review_decided_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(('decision', 'PENDING'), ('decided_at__isnull', False), _connector='OR'), name='chk_professional_review_decided_at_required'),
         ),
     ]

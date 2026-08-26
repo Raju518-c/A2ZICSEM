@@ -123,7 +123,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('sequence', models.PositiveSmallIntegerField(help_text='Evaluation order within the rule set; lower runs first. First matching rule wins.')),
-                ('label', models.CharField(help_text="Admin-facing description, e.g. 'Level 4 — Independent authority'.", max_length=160)),
+                ('label', models.CharField(help_text="Admin-facing description, e.g. 'Level 4 â€” Independent authority'.", max_length=160)),
                 ('match_type', models.CharField(choices=[('ALL_CONDITIONS', 'All conditions must be met'), ('ANY_CONDITION', 'Any one condition is sufficient')], default='ALL_CONDITIONS', help_text='Whether every condition or any single condition triggers this rule.', max_length=20)),
                 ('conditions', models.JSONField(help_text="Structured criteria evaluated against the professional's actual parameters for this field/scope, e.g. {'min_calendar_experience_months': 36, 'min_verified_field_days': 120, 'min_authority_status': 'PERFORMED', 'min_complexity_rating': 'INTERMEDIATE', 'required_certification_codes': ['NACE-CIP2']}. Schema validated by calculation_field_code, not enforced at the database level.")),
                 ('concluded_value', models.JSONField(help_text="Value the system assigns when conditions are satisfied, e.g. {'qualion_level': 'L4'} or {'is_deployable': 'DEPLOYABLE_WITH_RESTRICTIONS'}.")),
@@ -149,27 +149,27 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(('requested_by', models.F('approved_by')), _negated=True), name='chk_calc_override_requester_not_approver'),
+            constraint=models.CheckConstraint(check=models.Q(('requested_by', models.F('approved_by')), _negated=True), name='chk_calc_override_requester_not_approver'),
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('final_approved_value__isnull', False), _connector='OR'), name='chk_calc_override_final_value_required_on_approval'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('final_approved_value__isnull', False), _connector='OR'), name='chk_calc_override_final_value_required_on_approval'),
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_by__isnull', False), _connector='OR'), name='chk_calc_override_approver_required_on_approval'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'APPROVED'), _negated=True), ('approved_by__isnull', False), _connector='OR'), name='chk_calc_override_approver_required_on_approval'),
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision', 'REJECTED'), _negated=True), models.Q(('decision_reason', ''), _negated=True), _connector='OR'), name='chk_calc_override_decision_reason_required_on_rejection'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision', 'REJECTED'), _negated=True), models.Q(('decision_reason', ''), _negated=True), _connector='OR'), name='chk_calc_override_decision_reason_required_on_rejection'),
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('decision__in', ['APPROVED', 'REJECTED']), _negated=True), ('approved_at__isnull', False), _connector='OR'), name='chk_calc_override_approved_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('decision__in', ['APPROVED', 'REJECTED']), _negated=True), ('approved_at__isnull', False), _connector='OR'), name='chk_calc_override_approved_at_required'),
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldoverride',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('request_type', 'EXCEPTIONAL_OVERRIDE'), _negated=True), ('evidence__isnull', False), _connector='OR'), name='chk_calc_override_evidence_required_for_exception'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('request_type', 'EXCEPTIONAL_OVERRIDE'), _negated=True), ('evidence__isnull', False), _connector='OR'), name='chk_calc_override_evidence_required_for_exception'),
         ),
         migrations.AddIndex(
             model_name='calculatedfieldvaluehistory',
@@ -181,7 +181,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='calculatedfieldvaluehistory',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('change_source', 'OVERRIDE_APPROVED'), _negated=True), ('override__isnull', False), _connector='OR'), name='chk_calc_value_history_override_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('change_source', 'OVERRIDE_APPROVED'), _negated=True), ('override__isnull', False), _connector='OR'), name='chk_calc_value_history_override_required'),
         ),
         migrations.AddConstraint(
             model_name='calculationruleset',
@@ -189,15 +189,15 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='calculationruleset',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_calc_rule_set_published_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_calc_rule_set_published_at_required'),
         ),
         migrations.AddConstraint(
             model_name='calculationruleset',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_by__isnull', False), _connector='OR'), name='chk_calc_rule_set_published_by_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_by__isnull', False), _connector='OR'), name='chk_calc_rule_set_published_by_required'),
         ),
         migrations.AddConstraint(
             model_name='calculationruleset',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_calc_rule_set_retired_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_calc_rule_set_retired_at_required'),
         ),
         migrations.AddConstraint(
             model_name='calculationrule',

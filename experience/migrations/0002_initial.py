@@ -165,47 +165,47 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='employmentrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_employment_record_start_before_end'),
+            constraint=models.CheckConstraint(check=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_employment_record_start_before_end'),
         ),
         migrations.AddConstraint(
             model_name='employmentrecord',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('is_current', True), ('end_date__isnull', True)), models.Q(('is_current', False), ('end_date__isnull', False)), _connector='OR'), name='chk_employment_record_is_current_end_date_consistency'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('is_current', True), ('end_date__isnull', True)), models.Q(('is_current', False), ('end_date__isnull', False)), _connector='OR'), name='chk_employment_record_is_current_end_date_consistency'),
         ),
         migrations.AddConstraint(
             model_name='projectrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_project_record_start_before_end'),
+            constraint=models.CheckConstraint(check=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_project_record_start_before_end'),
         ),
         migrations.AddConstraint(
             model_name='projectrecord',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('is_current', True), ('end_date__isnull', True)), models.Q(('is_current', False), ('end_date__isnull', False)), _connector='OR'), name='chk_project_record_is_current_end_date_consistency'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('is_current', True), ('end_date__isnull', True)), models.Q(('is_current', False), ('end_date__isnull', False)), _connector='OR'), name='chk_project_record_is_current_end_date_consistency'),
         ),
         migrations.AddConstraint(
             model_name='projectrecord',
-            constraint=models.CheckConstraint(condition=models.Q(('allocation_percent__gt', 0), ('allocation_percent__lte', 100)), name='chk_project_record_allocation_percent_range'),
+            constraint=models.CheckConstraint(check=models.Q(('allocation_percent__gt', 0), ('allocation_percent__lte', 100)), name='chk_project_record_allocation_percent_range'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_professional_assignment_start_before_end'),
+            constraint=models.CheckConstraint(check=models.Q(('end_date__isnull', True), ('start_date__lte', models.F('end_date')), _connector='OR'), name='chk_professional_assignment_start_before_end'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(('allocation_percent__isnull', True), models.Q(('allocation_percent__gt', 0), ('allocation_percent__lte', 100)), _connector='OR'), name='chk_professional_assignment_allocation_percent_range'),
+            constraint=models.CheckConstraint(check=models.Q(('allocation_percent__isnull', True), models.Q(('allocation_percent__gt', 0), ('allocation_percent__lte', 100)), _connector='OR'), name='chk_professional_assignment_allocation_percent_range'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(('mentor_professional', models.F('professional')), _negated=True), name='chk_professional_assignment_mentor_not_self'),
+            constraint=models.CheckConstraint(check=models.Q(('mentor_professional', models.F('professional')), _negated=True), name='chk_professional_assignment_mentor_not_self'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('assignment_type__in', ['BRANCH', 'DEPARTMENT', 'OPERATING_UNIT']), _negated=True), ('organization__isnull', False), _connector='OR'), name='chk_professional_assignment_organization_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('assignment_type__in', ['BRANCH', 'DEPARTMENT', 'OPERATING_UNIT']), _negated=True), ('organization__isnull', False), _connector='OR'), name='chk_professional_assignment_organization_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('assignment_type__in', ['PROJECT', 'TECHNICAL_REVIEW']), _negated=True), ('project__isnull', False), _connector='OR'), name='chk_professional_assignment_project_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('assignment_type__in', ['PROJECT', 'TECHNICAL_REVIEW']), _negated=True), ('project__isnull', False), _connector='OR'), name='chk_professional_assignment_project_required'),
         ),
         migrations.AddConstraint(
             model_name='professionalassignment',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('assignment_type', 'MENTOR'), _negated=True), ('mentor_professional__isnull', False), _connector='OR'), name='chk_professional_assignment_mentor_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('assignment_type', 'MENTOR'), _negated=True), ('mentor_professional__isnull', False), _connector='OR'), name='chk_professional_assignment_mentor_required'),
         ),
         migrations.AddConstraint(
             model_name='projectscope',
@@ -213,19 +213,19 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='exposurelog',
-            constraint=models.CheckConstraint(condition=models.Q(('hours__isnull', True), models.Q(('hours__gt', 0), ('hours__lte', 24)), _connector='OR'), name='chk_exposure_log_hours_range'),
+            constraint=models.CheckConstraint(check=models.Q(('hours__isnull', True), models.Q(('hours__gt', 0), ('hours__lte', 24)), _connector='OR'), name='chk_exposure_log_hours_range'),
         ),
         migrations.AddConstraint(
             model_name='exposurelog',
-            constraint=models.CheckConstraint(condition=models.Q(('day_fraction__gt', 0), ('day_fraction__lte', 1)), name='chk_exposure_log_day_fraction_range'),
+            constraint=models.CheckConstraint(check=models.Q(('day_fraction__gt', 0), ('day_fraction__lte', 1)), name='chk_exposure_log_day_fraction_range'),
         ),
         migrations.AddConstraint(
             model_name='exposurelog',
-            constraint=models.CheckConstraint(condition=models.Q(('supervisor_professional', models.F('professional')), _negated=True), name='chk_exposure_log_supervisor_not_self'),
+            constraint=models.CheckConstraint(check=models.Q(('supervisor_professional', models.F('professional')), _negated=True), name='chk_exposure_log_supervisor_not_self'),
         ),
         migrations.AddConstraint(
             model_name='exposurelog',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_exposure_log_verified_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_exposure_log_verified_at_required'),
         ),
         migrations.AddConstraint(
             model_name='scoperesponse',
@@ -233,6 +233,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='scoperesponse',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_scope_response_verified_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('verification_status__in', ['VERIFIED', 'VALIDATED']), _negated=True), ('verified_at__isnull', False), _connector='OR'), name='chk_scope_response_verified_at_required'),
         ),
     ]

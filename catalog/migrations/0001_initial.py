@@ -150,11 +150,11 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='formmodule',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_form_module_published_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'PUBLISHED'), _negated=True), ('published_at__isnull', False), _connector='OR'), name='chk_form_module_published_at_required'),
         ),
         migrations.AddConstraint(
             model_name='formmodule',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_form_module_retired_at_required'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('status', 'RETIRED'), _negated=True), ('retired_at__isnull', False), _connector='OR'), name='chk_form_module_retired_at_required'),
         ),
         migrations.AddConstraint(
             model_name='formfield',
@@ -178,6 +178,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='scopemodule',
-            constraint=models.CheckConstraint(condition=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_scope_module_effective_from_before_to'),
+            constraint=models.CheckConstraint(check=models.Q(('effective_from__isnull', True), ('effective_to__isnull', True), ('effective_from__lte', models.F('effective_to')), _connector='OR'), name='chk_scope_module_effective_from_before_to'),
         ),
     ]

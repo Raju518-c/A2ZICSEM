@@ -17,17 +17,21 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name='tenantbusinessunit',
-            name='legal_entity',
-        ),
-        migrations.RemoveField(
-            model_name='tenantbusinessunit',
-            name='owner',
-        ),
-        migrations.RemoveField(
-            model_name='tenantbusinessunit',
-            name='tenant',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='tenantbusinessunit',
+                    name='legal_entity',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantbusinessunit',
+                    name='owner',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantbusinessunit',
+                    name='tenant',
+                ),
+            ],
         ),
         migrations.AlterField(
             model_name='project',
@@ -39,49 +43,69 @@ class Migration(migrations.Migration):
             name='business_unit',
             field=models.ForeignKey(blank=True, help_text='Must be an Organization row with organization_type in BRANCH/DEPARTMENT/OPERATING_UNIT — enforce in clean().', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='locations', to='tenancy.organization'),
         ),
-        migrations.RemoveField(
-            model_name='tenantindustry',
-            name='industry',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='tenantindustry',
+                    name='industry',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantindustry',
+                    name='tenant',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantmembership',
+                    name='invited_by',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantmembership',
+                    name='tenant',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantmembership',
+                    name='user',
+                ),
+            ],
         ),
-        migrations.RemoveField(
-            model_name='tenantindustry',
-            name='tenant',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveConstraint(
+                    model_name='projectmembership',
+                    name='uniq_project_membership',
+                ),
+            ],
         ),
-        migrations.RemoveField(
-            model_name='tenantmembership',
-            name='invited_by',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='projectmembership',
+                    name='membership',
+                ),
+            ],
         ),
-        migrations.RemoveField(
-            model_name='tenantmembership',
-            name='tenant',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='tenantroleassignment',
+                    name='membership',
+                ),
+            ],
         ),
-        migrations.RemoveField(
-            model_name='tenantmembership',
-            name='user',
-        ),
-        migrations.RemoveField(
-            model_name='projectmembership',
-            name='membership',
-        ),
-        migrations.RemoveField(
-            model_name='tenantroleassignment',
-            name='membership',
-        ),
-        migrations.RemoveField(
-            model_name='tenantresumetemplate',
-            name='tenant',
-        ),
-        migrations.RemoveField(
-            model_name='tenantscope',
-            name='scope_catalog',
-        ),
-        migrations.RemoveField(
-            model_name='tenantscope',
-            name='tenant',
-        ),
-        migrations.RemoveConstraint(
-            model_name='projectmembership',
-            name='uniq_project_membership',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='tenantresumetemplate',
+                    name='tenant',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantscope',
+                    name='scope_catalog',
+                ),
+                migrations.RemoveField(
+                    model_name='tenantscope',
+                    name='tenant',
+                ),
+            ],
         ),
         migrations.RemoveConstraint(
             model_name='tenantoperation',

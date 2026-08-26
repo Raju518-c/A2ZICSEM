@@ -7,6 +7,24 @@ import tenancy.models
 from django.db import migrations, models
 
 
+def add_project_membership_constraint_if_missing(apps, schema_editor):
+    project_membership = apps.get_model('tenancy', 'ProjectMembership')
+    constraint = next(
+        constraint
+        for constraint in project_membership._meta.constraints
+        if constraint.name == 'uniq_project_membership'
+    )
+
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor,
+            project_membership._meta.db_table,
+        )
+
+    if constraint.name not in constraints:
+        schema_editor.add_constraint(project_membership, constraint)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -507,9 +525,19 @@ class Migration(migrations.Migration):
             name='granted_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='tenant_roles_granted', to='accounts.usertbl'),
         ),
-        migrations.AddConstraint(
-            model_name='projectmembership',
-            constraint=models.UniqueConstraint(fields=('project', 'user'), name='uniq_project_membership'),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    add_project_membership_constraint_if_missing,
+                    migrations.RunPython.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.AddConstraint(
+                    model_name='projectmembership',
+                    constraint=models.UniqueConstraint(fields=('project', 'user'), name='uniq_project_membership'),
+                ),
+            ],
         ),
         migrations.AddConstraint(
             model_name='tenantoperation',

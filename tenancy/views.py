@@ -39,6 +39,8 @@ def _request_example(serializer_class):
             value = [] if field_type == "ListField" else {}
         elif field_type == "PrimaryKeyRelatedField":
             value = str(uuid.UUID(int=0)) if field.pk_field.__class__.__name__ == "UUIDField" else 1
+        elif field_type == "ManyRelatedField":
+            value = []
         elif field_type in {"EmailField", "URLField"}:
             value = "user@example.com" if field_type == "EmailField" else "https://example.com"
         elif field_type in {"FileField", "ImageField"}:

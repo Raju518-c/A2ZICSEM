@@ -267,10 +267,14 @@ class Migration(migrations.Migration):
                 migrations.RemoveField(model_name='tenantworkflow', name='public_id'),
             ],
         ),
-        migrations.AddField(
-            model_name='organization',
-            name='legal_entity',
-            field=models.ForeignKey(blank=True, help_text='Which legal entity this internal division sits under, if applicable.', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='business_units', to='tenancy.tenantlegalentity'),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='organization',
+                    name='legal_entity',
+                    field=models.ForeignKey(blank=True, help_text='Which legal entity this internal division sits under, if applicable.', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='business_units', to='tenancy.tenantlegalentity'),
+                ),
+            ],
         ),
         migrations.AddField(
             model_name='organization',

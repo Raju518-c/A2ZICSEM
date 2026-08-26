@@ -42,6 +42,32 @@ def remove_tenant_operation_constraint_if_present(apps, schema_editor):
         )
 
 
+def remove_public_id_fields_if_present(apps, schema_editor):
+    model_names = [
+        'ConflictOfInterestDeclaration', 'DataExportRequest', 'Module',
+        'ProjectRequirementScope', 'TenantApprovalMatrix', 'TenantBilling',
+        'TenantBranding', 'TenantIntegration', 'TenantInvitation',
+        'TenantLegalAcceptance', 'TenantLegalSettings', 'TenantModuleEntitlement',
+        'TenantNda', 'TenantNotificationSettings', 'TenantNumberingConfig',
+        'TenantOperationLog', 'TenantReportTemplate', 'TenantSecuritySettings',
+        'TenantSettings', 'TenantSubscription', 'TenantTerminology',
+        'TenantVerification', 'TenantWorkflow',
+    ]
+
+    with schema_editor.connection.cursor() as cursor:
+        for model_name in model_names:
+            model = apps.get_model('tenancy', model_name)
+            columns = {
+                column.name
+                for column in schema_editor.connection.introspection.get_table_description(
+                    cursor,
+                    model._meta.db_table,
+                )
+            }
+            if 'public_id' in columns:
+                schema_editor.remove_field(model, model._meta.get_field('public_id'))
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -53,6 +79,12 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_public_id_fields_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
             state_operations=[
                 migrations.RemoveField(
                     model_name='tenantbusinessunit',
@@ -79,6 +111,12 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(blank=True, help_text='Must be an Organization row with organization_type in BRANCH/DEPARTMENT/OPERATING_UNIT — enforce in clean().', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='locations', to='tenancy.organization'),
         ),
         migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_public_id_fields_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
             state_operations=[
                 migrations.RemoveField(
                     model_name='tenantindustry',
@@ -156,101 +194,40 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
-        migrations.RemoveField(
-            model_name='conflictofinterestdeclaration',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='dataexportrequest',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='module',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='projectrequirementscope',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantapprovalmatrix',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantbilling',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantbranding',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantintegration',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantinvitation',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantlegalacceptance',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantlegalsettings',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantmoduleentitlement',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantnda',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantnotificationsettings',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantnumberingconfig',
-            name='public_id',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(model_name='conflictofinterestdeclaration', name='public_id'),
+                migrations.RemoveField(model_name='dataexportrequest', name='public_id'),
+                migrations.RemoveField(model_name='module', name='public_id'),
+                migrations.RemoveField(model_name='projectrequirementscope', name='public_id'),
+                migrations.RemoveField(model_name='tenantapprovalmatrix', name='public_id'),
+                migrations.RemoveField(model_name='tenantbilling', name='public_id'),
+                migrations.RemoveField(model_name='tenantbranding', name='public_id'),
+                migrations.RemoveField(model_name='tenantintegration', name='public_id'),
+                migrations.RemoveField(model_name='tenantinvitation', name='public_id'),
+                migrations.RemoveField(model_name='tenantlegalacceptance', name='public_id'),
+                migrations.RemoveField(model_name='tenantlegalsettings', name='public_id'),
+                migrations.RemoveField(model_name='tenantmoduleentitlement', name='public_id'),
+                migrations.RemoveField(model_name='tenantnda', name='public_id'),
+                migrations.RemoveField(model_name='tenantnotificationsettings', name='public_id'),
+                migrations.RemoveField(model_name='tenantnumberingconfig', name='public_id'),
+            ],
         ),
         migrations.RemoveField(
             model_name='tenantoperation',
             name='created_by',
         ),
-        migrations.RemoveField(
-            model_name='tenantoperationlog',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantreporttemplate',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantsecuritysettings',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantsettings',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantsubscription',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantterminology',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantverification',
-            name='public_id',
-        ),
-        migrations.RemoveField(
-            model_name='tenantworkflow',
-            name='public_id',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(model_name='tenantoperationlog', name='public_id'),
+                migrations.RemoveField(model_name='tenantreporttemplate', name='public_id'),
+                migrations.RemoveField(model_name='tenantsecuritysettings', name='public_id'),
+                migrations.RemoveField(model_name='tenantsettings', name='public_id'),
+                migrations.RemoveField(model_name='tenantsubscription', name='public_id'),
+                migrations.RemoveField(model_name='tenantterminology', name='public_id'),
+                migrations.RemoveField(model_name='tenantverification', name='public_id'),
+                migrations.RemoveField(model_name='tenantworkflow', name='public_id'),
+            ],
         ),
         migrations.AddField(
             model_name='organization',

@@ -709,21 +709,21 @@ class TenantLegalEntityListCreateAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantLegalEntityRetrieveUpdateDeleteAPIView(APIView):
     """
-    GET    : Get tenant legal entity by public_id
+    GET    : Get tenant legal entity by pk
     PUT    : Update tenant legal entity (partial)
     DELETE : Delete tenant legal entity
     """
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantLegalEntity.objects.get(public_id=public_id)
+            return TenantLegalEntity.objects.get(pk=pk)
         except TenantLegalEntity.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        entity = self.get_object(public_id)
+    def get(self, request, pk):
+        entity = self.get_object(pk)
 
         if not entity:
             return Response(
@@ -745,8 +745,8 @@ class TenantLegalEntityRetrieveUpdateDeleteAPIView(APIView):
         )
 
     @extend_schema(request=TenantLegalEntitySerializer)
-    def put(self, request, public_id):
-        entity = self.get_object(public_id)
+    def put(self, request, pk):
+        entity = self.get_object(pk)
 
         if not entity:
             return Response(
@@ -782,8 +782,8 @@ class TenantLegalEntityRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    def delete(self, request, public_id):
-        entity = self.get_object(public_id)
+    def delete(self, request, pk):
+        entity = self.get_object(pk)
 
         if not entity:
             return Response(
@@ -859,21 +859,21 @@ class TenantTaxRegistrationListCreateAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantTaxRegistrationRetrieveUpdateDeleteAPIView(APIView):
     """
-    GET    : Get tenant tax registration by public_id
+    GET    : Get tenant tax registration by pk
     PUT    : Update tenant tax registration (partial)
     DELETE : Delete tenant tax registration
     """
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantTaxRegistration.objects.get(public_id=public_id)
+            return TenantTaxRegistration.objects.get(pk=pk)
         except TenantTaxRegistration.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        registration = self.get_object(public_id)
+    def get(self, request, pk):
+        registration = self.get_object(pk)
 
         if not registration:
             return Response(
@@ -895,8 +895,8 @@ class TenantTaxRegistrationRetrieveUpdateDeleteAPIView(APIView):
         )
 
     @extend_schema(request=TenantTaxRegistrationSerializer)
-    def put(self, request, public_id):
-        registration = self.get_object(public_id)
+    def put(self, request, pk):
+        registration = self.get_object(pk)
 
         if not registration:
             return Response(
@@ -932,8 +932,8 @@ class TenantTaxRegistrationRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    def delete(self, request, public_id):
-        registration = self.get_object(public_id)
+    def delete(self, request, pk):
+        registration = self.get_object(pk)
 
         if not registration:
             return Response(
@@ -1009,21 +1009,21 @@ class TenantDomainListCreateAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantDomainRetrieveUpdateDeleteAPIView(APIView):
     """
-    GET    : Get tenant domain by public_id
+    GET    : Get tenant domain by pk
     PUT    : Update tenant domain (partial)
     DELETE : Delete tenant domain
     """
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantDomain.objects.get(public_id=public_id)
+            return TenantDomain.objects.get(pk=pk)
         except TenantDomain.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        domain = self.get_object(public_id)
+    def get(self, request, pk):
+        domain = self.get_object(pk)
 
         if not domain:
             return Response(
@@ -1045,8 +1045,8 @@ class TenantDomainRetrieveUpdateDeleteAPIView(APIView):
         )
 
     @extend_schema(request=TenantDomainSerializer)
-    def put(self, request, public_id):
-        domain = self.get_object(public_id)
+    def put(self, request, pk):
+        domain = self.get_object(pk)
 
         if not domain:
             return Response(
@@ -1082,8 +1082,8 @@ class TenantDomainRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    def delete(self, request, public_id):
-        domain = self.get_object(public_id)
+    def delete(self, request, pk):
+        domain = self.get_object(pk)
 
         if not domain:
             return Response(
@@ -1159,21 +1159,21 @@ class TenantLocationListCreateAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantLocationRetrieveUpdateDeleteAPIView(APIView):
     """
-    GET    : Get tenant location by public_id
+    GET    : Get tenant location by pk
     PUT    : Update tenant location (partial)
     DELETE : Delete tenant location
     """
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantLocation.objects.get(public_id=public_id)
+            return TenantLocation.objects.get(pk=pk)
         except TenantLocation.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        location = self.get_object(public_id)
+    def get(self, request, pk):
+        location = self.get_object(pk)
 
         if not location:
             return Response(
@@ -1195,8 +1195,8 @@ class TenantLocationRetrieveUpdateDeleteAPIView(APIView):
         )
 
     @extend_schema(request=TenantLocationSerializer)
-    def put(self, request, public_id):
-        location = self.get_object(public_id)
+    def put(self, request, pk):
+        location = self.get_object(pk)
 
         if not location:
             return Response(
@@ -1232,8 +1232,8 @@ class TenantLocationRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    def delete(self, request, public_id):
-        location = self.get_object(public_id)
+    def delete(self, request, pk):
+        location = self.get_object(pk)
 
         if not location:
             return Response(
@@ -1305,14 +1305,14 @@ class TenantAuthorisedRepresentativeListCreateAPIView(APIView):
 class TenantAuthorisedRepresentativeRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantAuthorisedRepresentative.objects.get(public_id=public_id)
+            return TenantAuthorisedRepresentative.objects.get(pk=pk)
         except TenantAuthorisedRepresentative.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        rep = self.get_object(public_id)
+    def get(self, request, pk):
+        rep = self.get_object(pk)
 
         if not rep:
             return Response(
@@ -1325,8 +1325,8 @@ class TenantAuthorisedRepresentativeRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantAuthorisedRepresentativeSerializer)
-    def put(self, request, public_id):
-        rep = self.get_object(public_id)
+    def put(self, request, pk):
+        rep = self.get_object(pk)
 
         if not rep:
             return Response(
@@ -1353,8 +1353,8 @@ class TenantAuthorisedRepresentativeRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        rep = self.get_object(public_id)
+    def delete(self, request, pk):
+        rep = self.get_object(pk)
 
         if not rep:
             return Response(
@@ -1414,14 +1414,14 @@ class TenantContactListCreateAPIView(APIView):
 class TenantContactRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantContact.objects.get(public_id=public_id)
+            return TenantContact.objects.get(pk=pk)
         except TenantContact.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        contact = self.get_object(public_id)
+    def get(self, request, pk):
+        contact = self.get_object(pk)
 
         if not contact:
             return Response(
@@ -1434,8 +1434,8 @@ class TenantContactRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantContactSerializer)
-    def put(self, request, public_id):
-        contact = self.get_object(public_id)
+    def put(self, request, pk):
+        contact = self.get_object(pk)
 
         if not contact:
             return Response(
@@ -1462,8 +1462,8 @@ class TenantContactRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        contact = self.get_object(public_id)
+    def delete(self, request, pk):
+        contact = self.get_object(pk)
 
         if not contact:
             return Response(
@@ -1481,7 +1481,7 @@ class TenantContactRetrieveUpdateDeleteAPIView(APIView):
 
 # ---------------------------------------------------------------------
 # TenantVerification — append-only: GET (list/retrieve) + POST only.
-# No public_id (no UUIDModel) -> keyed by pk. No PUT/DELETE by design.
+# No pk (no UUIDModel) -> keyed by pk. No PUT/DELETE by design.
 # ---------------------------------------------------------------------
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -1531,14 +1531,14 @@ class TenantVerificationRetrieveUpdateDeleteAPIView(APIView):
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantVerification.objects.get(public_id=public_id)
+            return TenantVerification.objects.get(pk=pk)
         except TenantVerification.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        verification = self.get_object(public_id)
+    def get(self, request, pk):
+        verification = self.get_object(pk)
 
         if not verification:
             return Response(
@@ -1551,8 +1551,8 @@ class TenantVerificationRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantVerificationSerializer)
-    def put(self, request, public_id):
-        verification = self.get_object(public_id)
+    def put(self, request, pk):
+        verification = self.get_object(pk)
 
         if not verification:
             return Response(
@@ -1579,8 +1579,8 @@ class TenantVerificationRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        verification = self.get_object(public_id)
+    def delete(self, request, pk):
+        verification = self.get_object(pk)
 
         if not verification:
             return Response(
@@ -1641,14 +1641,14 @@ class TenantDocumentRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantDocument.objects.get(public_id=public_id)
+            return TenantDocument.objects.get(pk=pk)
         except TenantDocument.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        document = self.get_object(public_id)
+    def get(self, request, pk):
+        document = self.get_object(pk)
 
         if not document:
             return Response(
@@ -1661,8 +1661,8 @@ class TenantDocumentRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantDocumentSerializer)
-    def put(self, request, public_id):
-        document = self.get_object(public_id)
+    def put(self, request, pk):
+        document = self.get_object(pk)
 
         if not document:
             return Response(
@@ -1689,8 +1689,8 @@ class TenantDocumentRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        document = self.get_object(public_id)
+    def delete(self, request, pk):
+        document = self.get_object(pk)
 
         if not document:
             return Response(
@@ -1752,14 +1752,14 @@ class TenantLegalAcceptanceRetrieveAPIView(APIView):
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantLegalAcceptance.objects.get(public_id=public_id)
+            return TenantLegalAcceptance.objects.get(pk=pk)
         except TenantLegalAcceptance.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        acceptance = self.get_object(public_id)
+    def get(self, request, pk):
+        acceptance = self.get_object(pk)
 
         if not acceptance:
             return Response(
@@ -1816,14 +1816,14 @@ class TenantLegalSettingsListCreateAPIView(APIView):
 class TenantLegalSettingsRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantLegalSettings.objects.get(public_id=public_id)
+            return TenantLegalSettings.objects.get(pk=pk)
         except TenantLegalSettings.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def get(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -1836,8 +1836,8 @@ class TenantLegalSettingsRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantLegalSettingsSerializer)
-    def put(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def put(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -1864,8 +1864,8 @@ class TenantLegalSettingsRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def delete(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -1925,14 +1925,14 @@ class TenantNdaListCreateAPIView(APIView):
 class TenantNdaRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantNda.objects.get(public_id=public_id)
+            return TenantNda.objects.get(pk=pk)
         except TenantNda.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        nda = self.get_object(public_id)
+    def get(self, request, pk):
+        nda = self.get_object(pk)
 
         if not nda:
             return Response(
@@ -1945,8 +1945,8 @@ class TenantNdaRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantNdaSerializer)
-    def put(self, request, public_id):
-        nda = self.get_object(public_id)
+    def put(self, request, pk):
+        nda = self.get_object(pk)
 
         if not nda:
             return Response(
@@ -1973,8 +1973,8 @@ class TenantNdaRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        nda = self.get_object(public_id)
+    def delete(self, request, pk):
+        nda = self.get_object(pk)
 
         if not nda:
             return Response(
@@ -2034,14 +2034,14 @@ class TenantSettingsListCreateAPIView(APIView):
 class TenantSettingsRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantSettings.objects.get(public_id=public_id)
+            return TenantSettings.objects.get(pk=pk)
         except TenantSettings.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def get(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2054,8 +2054,8 @@ class TenantSettingsRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantSettingsSerializer)
-    def put(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def put(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2082,8 +2082,8 @@ class TenantSettingsRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def delete(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2144,14 +2144,14 @@ class TenantSubscriptionRetrieveAPIView(APIView):
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantSubscription.objects.get(public_id=public_id)
+            return TenantSubscription.objects.get(pk=pk)
         except TenantSubscription.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        subscription = self.get_object(public_id)
+    def get(self, request, pk):
+        subscription = self.get_object(pk)
 
         if not subscription:
             return Response(
@@ -2208,14 +2208,14 @@ class ModuleListCreateAPIView(APIView):
 class ModuleRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return Module.objects.get(public_id=public_id)
+            return Module.objects.get(pk=pk)
         except Module.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        module = self.get_object(public_id)
+    def get(self, request, pk):
+        module = self.get_object(pk)
 
         if not module:
             return Response(
@@ -2228,8 +2228,8 @@ class ModuleRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ModuleSerializer)
-    def put(self, request, public_id):
-        module = self.get_object(public_id)
+    def put(self, request, pk):
+        module = self.get_object(pk)
 
         if not module:
             return Response(
@@ -2253,8 +2253,8 @@ class ModuleRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        module = self.get_object(public_id)
+    def delete(self, request, pk):
+        module = self.get_object(pk)
 
         if not module:
             return Response(
@@ -2314,14 +2314,14 @@ class TenantModuleEntitlementListCreateAPIView(APIView):
 class TenantModuleEntitlementRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantModuleEntitlement.objects.get(public_id=public_id)
+            return TenantModuleEntitlement.objects.get(pk=pk)
         except TenantModuleEntitlement.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        entitlement = self.get_object(public_id)
+    def get(self, request, pk):
+        entitlement = self.get_object(pk)
 
         if not entitlement:
             return Response(
@@ -2334,8 +2334,8 @@ class TenantModuleEntitlementRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantModuleEntitlementSerializer)
-    def put(self, request, public_id):
-        entitlement = self.get_object(public_id)
+    def put(self, request, pk):
+        entitlement = self.get_object(pk)
 
         if not entitlement:
             return Response(
@@ -2362,8 +2362,8 @@ class TenantModuleEntitlementRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        entitlement = self.get_object(public_id)
+    def delete(self, request, pk):
+        entitlement = self.get_object(pk)
 
         if not entitlement:
             return Response(
@@ -2425,14 +2425,14 @@ class TenantBrandingRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantBranding.objects.get(public_id=public_id)
+            return TenantBranding.objects.get(pk=pk)
         except TenantBranding.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        branding = self.get_object(public_id)
+    def get(self, request, pk):
+        branding = self.get_object(pk)
 
         if not branding:
             return Response(
@@ -2445,8 +2445,8 @@ class TenantBrandingRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantBrandingSerializer)
-    def put(self, request, public_id):
-        branding = self.get_object(public_id)
+    def put(self, request, pk):
+        branding = self.get_object(pk)
 
         if not branding:
             return Response(
@@ -2473,8 +2473,8 @@ class TenantBrandingRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        branding = self.get_object(public_id)
+    def delete(self, request, pk):
+        branding = self.get_object(pk)
 
         if not branding:
             return Response(
@@ -2536,14 +2536,14 @@ class TenantReportTemplateRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantReportTemplate.objects.get(public_id=public_id)
+            return TenantReportTemplate.objects.get(pk=pk)
         except TenantReportTemplate.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        template = self.get_object(public_id)
+    def get(self, request, pk):
+        template = self.get_object(pk)
 
         if not template:
             return Response(
@@ -2556,8 +2556,8 @@ class TenantReportTemplateRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantReportTemplateSerializer)
-    def put(self, request, public_id):
-        template = self.get_object(public_id)
+    def put(self, request, pk):
+        template = self.get_object(pk)
 
         if not template:
             return Response(
@@ -2584,8 +2584,8 @@ class TenantReportTemplateRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        template = self.get_object(public_id)
+    def delete(self, request, pk):
+        template = self.get_object(pk)
 
         if not template:
             return Response(
@@ -2644,14 +2644,14 @@ class TenantSecuritySettingsListCreateAPIView(APIView):
 class TenantSecuritySettingsRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantSecuritySettings.objects.get(public_id=public_id)
+            return TenantSecuritySettings.objects.get(pk=pk)
         except TenantSecuritySettings.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def get(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2664,8 +2664,8 @@ class TenantSecuritySettingsRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantSecuritySettingsSerializer)
-    def put(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def put(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2692,8 +2692,8 @@ class TenantSecuritySettingsRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def delete(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -2753,14 +2753,14 @@ class TenantIPRestrictionListCreateAPIView(APIView):
 class TenantIPRestrictionRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantIPRestriction.objects.get(public_id=public_id)
+            return TenantIPRestriction.objects.get(pk=pk)
         except TenantIPRestriction.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        restriction = self.get_object(public_id)
+    def get(self, request, pk):
+        restriction = self.get_object(pk)
 
         if not restriction:
             return Response(
@@ -2773,8 +2773,8 @@ class TenantIPRestrictionRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantIPRestrictionSerializer)
-    def put(self, request, public_id):
-        restriction = self.get_object(public_id)
+    def put(self, request, pk):
+        restriction = self.get_object(pk)
 
         if not restriction:
             return Response(
@@ -2798,8 +2798,8 @@ class TenantIPRestrictionRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        restriction = self.get_object(public_id)
+    def delete(self, request, pk):
+        restriction = self.get_object(pk)
 
         if not restriction:
             return Response(
@@ -2859,14 +2859,14 @@ class TenantIntegrationListCreateAPIView(APIView):
 class TenantIntegrationRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantIntegration.objects.get(public_id=public_id)
+            return TenantIntegration.objects.get(pk=pk)
         except TenantIntegration.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        integration = self.get_object(public_id)
+    def get(self, request, pk):
+        integration = self.get_object(pk)
 
         if not integration:
             return Response(
@@ -2879,8 +2879,8 @@ class TenantIntegrationRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantIntegrationSerializer)
-    def put(self, request, public_id):
-        integration = self.get_object(public_id)
+    def put(self, request, pk):
+        integration = self.get_object(pk)
 
         if not integration:
             return Response(
@@ -2907,8 +2907,8 @@ class TenantIntegrationRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        integration = self.get_object(public_id)
+    def delete(self, request, pk):
+        integration = self.get_object(pk)
 
         if not integration:
             return Response(
@@ -2968,14 +2968,14 @@ class TenantBillingListCreateAPIView(APIView):
 class TenantBillingRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantBilling.objects.get(public_id=public_id)
+            return TenantBilling.objects.get(pk=pk)
         except TenantBilling.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        billing = self.get_object(public_id)
+    def get(self, request, pk):
+        billing = self.get_object(pk)
 
         if not billing:
             return Response(
@@ -2988,8 +2988,8 @@ class TenantBillingRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantBillingSerializer)
-    def put(self, request, public_id):
-        billing = self.get_object(public_id)
+    def put(self, request, pk):
+        billing = self.get_object(pk)
 
         if not billing:
             return Response(
@@ -3016,8 +3016,8 @@ class TenantBillingRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        billing = self.get_object(public_id)
+    def delete(self, request, pk):
+        billing = self.get_object(pk)
 
         if not billing:
             return Response(
@@ -3076,14 +3076,14 @@ class TenantInvitationListCreateAPIView(APIView):
 class TenantInvitationRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantInvitation.objects.get(public_id=public_id)
+            return TenantInvitation.objects.get(pk=pk)
         except TenantInvitation.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        invitation = self.get_object(public_id)
+    def get(self, request, pk):
+        invitation = self.get_object(pk)
 
         if not invitation:
             return Response(
@@ -3096,8 +3096,8 @@ class TenantInvitationRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantInvitationSerializer)
-    def put(self, request, public_id):
-        invitation = self.get_object(public_id)
+    def put(self, request, pk):
+        invitation = self.get_object(pk)
 
         if not invitation:
             return Response(
@@ -3124,8 +3124,8 @@ class TenantInvitationRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        invitation = self.get_object(public_id)
+    def delete(self, request, pk):
+        invitation = self.get_object(pk)
 
         if not invitation:
             return Response(
@@ -3185,14 +3185,14 @@ class TenantWorkflowListCreateAPIView(APIView):
 class TenantWorkflowRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantWorkflow.objects.get(public_id=public_id)
+            return TenantWorkflow.objects.get(pk=pk)
         except TenantWorkflow.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        workflow = self.get_object(public_id)
+    def get(self, request, pk):
+        workflow = self.get_object(pk)
 
         if not workflow:
             return Response(
@@ -3205,8 +3205,8 @@ class TenantWorkflowRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantWorkflowSerializer)
-    def put(self, request, public_id):
-        workflow = self.get_object(public_id)
+    def put(self, request, pk):
+        workflow = self.get_object(pk)
 
         if not workflow:
             return Response(
@@ -3233,8 +3233,8 @@ class TenantWorkflowRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        workflow = self.get_object(public_id)
+    def delete(self, request, pk):
+        workflow = self.get_object(pk)
 
         if not workflow:
             return Response(
@@ -3294,14 +3294,14 @@ class TenantWorkflowStepListCreateAPIView(APIView):
 class TenantWorkflowStepRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantWorkflowStep.objects.get(public_id=public_id)
+            return TenantWorkflowStep.objects.get(pk=pk)
         except TenantWorkflowStep.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        step = self.get_object(public_id)
+    def get(self, request, pk):
+        step = self.get_object(pk)
 
         if not step:
             return Response(
@@ -3314,8 +3314,8 @@ class TenantWorkflowStepRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantWorkflowStepSerializer)
-    def put(self, request, public_id):
-        step = self.get_object(public_id)
+    def put(self, request, pk):
+        step = self.get_object(pk)
 
         if not step:
             return Response(
@@ -3339,8 +3339,8 @@ class TenantWorkflowStepRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        step = self.get_object(public_id)
+    def delete(self, request, pk):
+        step = self.get_object(pk)
 
         if not step:
             return Response(
@@ -3400,14 +3400,14 @@ class TenantOperationLogListCreateAPIView(APIView):
 class TenantOperationLogRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantOperationLog.objects.get(public_id=public_id)
+            return TenantOperationLog.objects.get(pk=pk)
         except TenantOperationLog.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        log = self.get_object(public_id)
+    def get(self, request, pk):
+        log = self.get_object(pk)
 
         if not log:
             return Response(
@@ -3420,8 +3420,8 @@ class TenantOperationLogRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantOperationLogSerializer)
-    def put(self, request, public_id):
-        log = self.get_object(public_id)
+    def put(self, request, pk):
+        log = self.get_object(pk)
 
         if not log:
             return Response(
@@ -3448,8 +3448,8 @@ class TenantOperationLogRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        log = self.get_object(public_id)
+    def delete(self, request, pk):
+        log = self.get_object(pk)
 
         if not log:
             return Response(
@@ -3510,14 +3510,14 @@ class TenantTerminologyListCreateAPIView(APIView):
 class TenantTerminologyRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantTerminology.objects.get(public_id=public_id)
+            return TenantTerminology.objects.get(pk=pk)
         except TenantTerminology.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        term = self.get_object(public_id)
+    def get(self, request, pk):
+        term = self.get_object(pk)
 
         if not term:
             return Response(
@@ -3530,8 +3530,8 @@ class TenantTerminologyRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantTerminologySerializer)
-    def put(self, request, public_id):
-        term = self.get_object(public_id)
+    def put(self, request, pk):
+        term = self.get_object(pk)
 
         if not term:
             return Response(
@@ -3558,8 +3558,8 @@ class TenantTerminologyRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        term = self.get_object(public_id)
+    def delete(self, request, pk):
+        term = self.get_object(pk)
 
         if not term:
             return Response(
@@ -3619,14 +3619,14 @@ class TenantNumberingConfigListCreateAPIView(APIView):
 class TenantNumberingConfigRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantNumberingConfig.objects.get(public_id=public_id)
+            return TenantNumberingConfig.objects.get(pk=pk)
         except TenantNumberingConfig.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        config = self.get_object(public_id)
+    def get(self, request, pk):
+        config = self.get_object(pk)
 
         if not config:
             return Response(
@@ -3639,8 +3639,8 @@ class TenantNumberingConfigRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantNumberingConfigSerializer)
-    def put(self, request, public_id):
-        config = self.get_object(public_id)
+    def put(self, request, pk):
+        config = self.get_object(pk)
 
         if not config:
             return Response(
@@ -3667,8 +3667,8 @@ class TenantNumberingConfigRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        config = self.get_object(public_id)
+    def delete(self, request, pk):
+        config = self.get_object(pk)
 
         if not config:
             return Response(
@@ -3728,14 +3728,14 @@ class TenantApprovalMatrixListCreateAPIView(APIView):
 class TenantApprovalMatrixRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantApprovalMatrix.objects.get(public_id=public_id)
+            return TenantApprovalMatrix.objects.get(pk=pk)
         except TenantApprovalMatrix.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        matrix = self.get_object(public_id)
+    def get(self, request, pk):
+        matrix = self.get_object(pk)
 
         if not matrix:
             return Response(
@@ -3748,8 +3748,8 @@ class TenantApprovalMatrixRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantApprovalMatrixSerializer)
-    def put(self, request, public_id):
-        matrix = self.get_object(public_id)
+    def put(self, request, pk):
+        matrix = self.get_object(pk)
 
         if not matrix:
             return Response(
@@ -3776,8 +3776,8 @@ class TenantApprovalMatrixRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        matrix = self.get_object(public_id)
+    def delete(self, request, pk):
+        matrix = self.get_object(pk)
 
         if not matrix:
             return Response(
@@ -3837,14 +3837,14 @@ class TenantNotificationSettingsListCreateAPIView(APIView):
 class TenantNotificationSettingsRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return TenantNotificationSettings.objects.get(public_id=public_id)
+            return TenantNotificationSettings.objects.get(pk=pk)
         except TenantNotificationSettings.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def get(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -3857,8 +3857,8 @@ class TenantNotificationSettingsRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=TenantNotificationSettingsSerializer)
-    def put(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def put(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -3885,8 +3885,8 @@ class TenantNotificationSettingsRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        settings_obj = self.get_object(public_id)
+    def delete(self, request, pk):
+        settings_obj = self.get_object(pk)
 
         if not settings_obj:
             return Response(
@@ -3946,14 +3946,14 @@ class ConflictOfInterestDeclarationListCreateAPIView(APIView):
 class ConflictOfInterestDeclarationRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ConflictOfInterestDeclaration.objects.get(public_id=public_id)
+            return ConflictOfInterestDeclaration.objects.get(pk=pk)
         except ConflictOfInterestDeclaration.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        declaration = self.get_object(public_id)
+    def get(self, request, pk):
+        declaration = self.get_object(pk)
 
         if not declaration:
             return Response(
@@ -3966,8 +3966,8 @@ class ConflictOfInterestDeclarationRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ConflictOfInterestDeclarationSerializer)
-    def put(self, request, public_id):
-        declaration = self.get_object(public_id)
+    def put(self, request, pk):
+        declaration = self.get_object(pk)
 
         if not declaration:
             return Response(
@@ -3994,8 +3994,8 @@ class ConflictOfInterestDeclarationRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        declaration = self.get_object(public_id)
+    def delete(self, request, pk):
+        declaration = self.get_object(pk)
 
         if not declaration:
             return Response(
@@ -4055,14 +4055,14 @@ class DataExportRequestListCreateAPIView(APIView):
 class DataExportRequestRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return DataExportRequest.objects.get(public_id=public_id)
+            return DataExportRequest.objects.get(pk=pk)
         except DataExportRequest.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        export_request = self.get_object(public_id)
+    def get(self, request, pk):
+        export_request = self.get_object(pk)
 
         if not export_request:
             return Response(
@@ -4075,8 +4075,8 @@ class DataExportRequestRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=DataExportRequestSerializer)
-    def put(self, request, public_id):
-        export_request = self.get_object(public_id)
+    def put(self, request, pk):
+        export_request = self.get_object(pk)
 
         if not export_request:
             return Response(
@@ -4103,8 +4103,8 @@ class DataExportRequestRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        export_request = self.get_object(public_id)
+    def delete(self, request, pk):
+        export_request = self.get_object(pk)
 
         if not export_request:
             return Response(
@@ -4165,14 +4165,14 @@ class ProjectListCreateAPIView(APIView):
 class ProjectRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return Project.objects.get(public_id=public_id)
+            return Project.objects.get(pk=pk)
         except Project.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        project = self.get_object(public_id)
+    def get(self, request, pk):
+        project = self.get_object(pk)
 
         if not project:
             return Response(
@@ -4185,8 +4185,8 @@ class ProjectRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectSerializer)
-    def put(self, request, public_id):
-        project = self.get_object(public_id)
+    def put(self, request, pk):
+        project = self.get_object(pk)
 
         if not project:
             return Response(
@@ -4213,8 +4213,8 @@ class ProjectRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        project = self.get_object(public_id)
+    def delete(self, request, pk):
+        project = self.get_object(pk)
 
         if not project:
             return Response(
@@ -4274,14 +4274,14 @@ class ProjectRequirementListCreateAPIView(APIView):
 class ProjectRequirementRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ProjectRequirement.objects.get(public_id=public_id)
+            return ProjectRequirement.objects.get(pk=pk)
         except ProjectRequirement.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        requirement = self.get_object(public_id)
+    def get(self, request, pk):
+        requirement = self.get_object(pk)
 
         if not requirement:
             return Response(
@@ -4294,8 +4294,8 @@ class ProjectRequirementRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectRequirementSerializer)
-    def put(self, request, public_id):
-        requirement = self.get_object(public_id)
+    def put(self, request, pk):
+        requirement = self.get_object(pk)
 
         if not requirement:
             return Response(
@@ -4319,8 +4319,8 @@ class ProjectRequirementRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        requirement = self.get_object(public_id)
+    def delete(self, request, pk):
+        requirement = self.get_object(pk)
 
         if not requirement:
             return Response(
@@ -4380,14 +4380,14 @@ class ProjectRequirementScopeListCreateAPIView(APIView):
 class ProjectRequirementScopeRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ProjectRequirementScope.objects.get(public_id=public_id)
+            return ProjectRequirementScope.objects.get(pk=pk)
         except ProjectRequirementScope.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        scope = self.get_object(public_id)
+    def get(self, request, pk):
+        scope = self.get_object(pk)
 
         if not scope:
             return Response(
@@ -4400,8 +4400,8 @@ class ProjectRequirementScopeRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectRequirementScopeSerializer)
-    def put(self, request, public_id):
-        scope = self.get_object(public_id)
+    def put(self, request, pk):
+        scope = self.get_object(pk)
 
         if not scope:
             return Response(
@@ -4425,8 +4425,8 @@ class ProjectRequirementScopeRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        scope = self.get_object(public_id)
+    def delete(self, request, pk):
+        scope = self.get_object(pk)
 
         if not scope:
             return Response(
@@ -4486,14 +4486,14 @@ class ProjectCandidateListCreateAPIView(APIView):
 class ProjectCandidateRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ProjectCandidate.objects.get(public_id=public_id)
+            return ProjectCandidate.objects.get(pk=pk)
         except ProjectCandidate.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        candidate = self.get_object(public_id)
+    def get(self, request, pk):
+        candidate = self.get_object(pk)
 
         if not candidate:
             return Response(
@@ -4506,8 +4506,8 @@ class ProjectCandidateRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectCandidateSerializer)
-    def put(self, request, public_id):
-        candidate = self.get_object(public_id)
+    def put(self, request, pk):
+        candidate = self.get_object(pk)
 
         if not candidate:
             return Response(
@@ -4531,8 +4531,8 @@ class ProjectCandidateRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        candidate = self.get_object(public_id)
+    def delete(self, request, pk):
+        candidate = self.get_object(pk)
 
         if not candidate:
             return Response(
@@ -4592,14 +4592,14 @@ class DisclosureRequestListCreateAPIView(APIView):
 class DisclosureRequestRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return DisclosureRequest.objects.get(public_id=public_id)
+            return DisclosureRequest.objects.get(pk=pk)
         except DisclosureRequest.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        disclosure = self.get_object(public_id)
+    def get(self, request, pk):
+        disclosure = self.get_object(pk)
 
         if not disclosure:
             return Response(
@@ -4612,8 +4612,8 @@ class DisclosureRequestRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=DisclosureRequestSerializer)
-    def put(self, request, public_id):
-        disclosure = self.get_object(public_id)
+    def put(self, request, pk):
+        disclosure = self.get_object(pk)
 
         if not disclosure:
             return Response(
@@ -4640,8 +4640,8 @@ class DisclosureRequestRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        disclosure = self.get_object(public_id)
+    def delete(self, request, pk):
+        disclosure = self.get_object(pk)
 
         if not disclosure:
             return Response(
@@ -4706,14 +4706,14 @@ class CandidateConsentRetrieveAPIView(APIView):
 
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return CandidateConsent.objects.get(public_id=public_id)
+            return CandidateConsent.objects.get(pk=pk)
         except CandidateConsent.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        consent = self.get_object(public_id)
+    def get(self, request, pk):
+        consent = self.get_object(pk)
 
         if not consent:
             return Response(
@@ -4770,14 +4770,14 @@ class ProjectPlacementListCreateAPIView(APIView):
 class ProjectPlacementRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ProjectPlacement.objects.get(public_id=public_id)
+            return ProjectPlacement.objects.get(pk=pk)
         except ProjectPlacement.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        placement = self.get_object(public_id)
+    def get(self, request, pk):
+        placement = self.get_object(pk)
 
         if not placement:
             return Response(
@@ -4790,8 +4790,8 @@ class ProjectPlacementRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectPlacementSerializer)
-    def put(self, request, public_id):
-        placement = self.get_object(public_id)
+    def put(self, request, pk):
+        placement = self.get_object(pk)
 
         if not placement:
             return Response(
@@ -4815,8 +4815,8 @@ class ProjectPlacementRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        placement = self.get_object(public_id)
+    def delete(self, request, pk):
+        placement = self.get_object(pk)
 
         if not placement:
             return Response(
@@ -4876,14 +4876,14 @@ class ProjectScopeLinkListCreateAPIView(APIView):
 class ProjectScopeLinkRetrieveUpdateDeleteAPIView(APIView):
     permission_classes = [AllowAny]
 
-    def get_object(self, public_id):
+    def get_object(self, pk):
         try:
-            return ProjectScopeLink.objects.get(public_id=public_id)
+            return ProjectScopeLink.objects.get(pk=pk)
         except ProjectScopeLink.DoesNotExist:
             return None
 
-    def get(self, request, public_id):
-        link = self.get_object(public_id)
+    def get(self, request, pk):
+        link = self.get_object(pk)
 
         if not link:
             return Response(
@@ -4896,8 +4896,8 @@ class ProjectScopeLinkRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     @extend_schema(request=ProjectScopeLinkSerializer)
-    def put(self, request, public_id):
-        link = self.get_object(public_id)
+    def put(self, request, pk):
+        link = self.get_object(pk)
 
         if not link:
             return Response(
@@ -4921,8 +4921,8 @@ class ProjectScopeLinkRetrieveUpdateDeleteAPIView(APIView):
 
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, public_id):
-        link = self.get_object(public_id)
+    def delete(self, request, pk):
+        link = self.get_object(pk)
 
         if not link:
             return Response(

@@ -276,10 +276,14 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
-        migrations.AddField(
-            model_name='organization',
-            name='owner',
-            field=models.ForeignKey(blank=True, help_text='Required in practice for BRANCH/DEPARTMENT/OPERATING_UNIT rows (sheet 19 tenant_business_units.owner); optional for external org types.', null=True, on_delete=django.db.models.deletion.PROTECT, related_name='owned_organizations', to='accounts.usertbl'),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='organization',
+                    name='owner',
+                    field=models.ForeignKey(blank=True, help_text='Required in practice for BRANCH/DEPARTMENT/OPERATING_UNIT rows (sheet 19 tenant_business_units.owner); optional for external org types.', null=True, on_delete=django.db.models.deletion.PROTECT, related_name='owned_organizations', to='accounts.usertbl'),
+                ),
+            ],
         ),
         migrations.AddField(
             model_name='projectmembership',

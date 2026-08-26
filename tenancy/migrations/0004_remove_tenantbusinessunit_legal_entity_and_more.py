@@ -68,6 +68,34 @@ def remove_public_id_fields_if_present(apps, schema_editor):
                 schema_editor.remove_field(model, model._meta.get_field('public_id'))
 
 
+def remove_tenant_operation_created_by_if_present(apps, schema_editor):
+    tenant_operation = apps.get_model('tenancy', 'TenantOperation')
+
+    with schema_editor.connection.cursor() as cursor:
+        columns = {
+            column.name
+            for column in schema_editor.connection.introspection.get_table_description(
+                cursor,
+                tenant_operation._meta.db_table,
+            )
+        }
+
+    if 'created_by' in tenant_operation._meta.fields_map and 'created_by_id' in columns:
+        schema_editor.remove_field(tenant_operation, tenant_operation._meta.get_field('created_by'))
+
+
+def delete_legacy_models_if_present(apps, schema_editor):
+    model_names = [
+        'TenantBusinessUnit', 'TenantIndustry', 'TenantMembership',
+        'TenantResumeTemplate', 'TenantScope',
+    ]
+    existing_tables = set(schema_editor.connection.introspection.table_names())
+    for model_name in model_names:
+        model = apps.get_model('tenancy', model_name)
+        if model._meta.db_table in existing_tables:
+            schema_editor.delete_model(model)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -79,12 +107,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(
-                    remove_public_id_fields_if_present,
-                    migrations.RunPython.noop,
-                ),
-            ],
             state_operations=[
                 migrations.RemoveField(
                     model_name='tenantbusinessunit',
@@ -111,12 +133,6 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(blank=True, help_text='Must be an Organization row with organization_type in BRANCH/DEPARTMENT/OPERATING_UNIT — enforce in clean().', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='locations', to='tenancy.organization'),
         ),
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(
-                    remove_public_id_fields_if_present,
-                    migrations.RunPython.noop,
-                ),
-            ],
             state_operations=[
                 migrations.RemoveField(
                     model_name='tenantindustry',
@@ -141,6 +157,12 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_public_id_fields_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
             state_operations=[
                 migrations.RemoveConstraint(
                     model_name='projectmembership',
@@ -149,6 +171,12 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_public_id_fields_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
             state_operations=[
                 migrations.RemoveField(
                     model_name='projectmembership',
@@ -213,9 +241,19 @@ class Migration(migrations.Migration):
                 migrations.RemoveField(model_name='tenantnumberingconfig', name='public_id'),
             ],
         ),
-        migrations.RemoveField(
-            model_name='tenantoperation',
-            name='created_by',
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_tenant_operation_created_by_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='tenantoperation',
+                    name='created_by',
+                ),
+            ],
         ),
         migrations.SeparateDatabaseAndState(
             state_operations=[
@@ -547,19 +585,19 @@ class Migration(migrations.Migration):
             model_name='tenantoperation',
             constraint=models.UniqueConstraint(fields=('tenant', 'industry', 'country_code'), name='uniq_tenant_operation_tenant_industry_country'),
         ),
-        migrations.DeleteModel(
-            name='TenantBusinessUnit',
-        ),
-        migrations.DeleteModel(
-            name='TenantIndustry',
-        ),
-        migrations.DeleteModel(
-            name='TenantMembership',
-        ),
-        migrations.DeleteModel(
-            name='TenantResumeTemplate',
-        ),
-        migrations.DeleteModel(
-            name='TenantScope',
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    delete_legacy_models_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.DeleteModel(name='TenantBusinessUnit'),
+                migrations.DeleteModel(name='TenantIndustry'),
+                migrations.DeleteModel(name='TenantMembership'),
+                migrations.DeleteModel(name='TenantResumeTemplate'),
+                migrations.DeleteModel(name='TenantScope'),
+            ],
         ),
     ]

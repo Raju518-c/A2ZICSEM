@@ -25,6 +25,23 @@ def add_project_membership_constraint_if_missing(apps, schema_editor):
         schema_editor.add_constraint(project_membership, constraint)
 
 
+def remove_tenant_operation_constraint_if_present(apps, schema_editor):
+    tenant_operation = apps.get_model('tenancy', 'TenantOperation')
+
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor,
+            tenant_operation._meta.db_table,
+        )
+
+    if 'uniq_tenant_operation' in constraints:
+        schema_editor.execute(
+            'ALTER TABLE `{}` DROP INDEX `uniq_tenant_operation`'.format(
+                tenant_operation._meta.db_table,
+            )
+        )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -125,9 +142,19 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
-        migrations.RemoveConstraint(
-            model_name='tenantoperation',
-            name='uniq_tenant_operation',
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    remove_tenant_operation_constraint_if_present,
+                    migrations.RunPython.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.RemoveConstraint(
+                    model_name='tenantoperation',
+                    name='uniq_tenant_operation',
+                ),
+            ],
         ),
         migrations.RemoveField(
             model_name='conflictofinterestdeclaration',

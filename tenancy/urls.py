@@ -79,15 +79,6 @@ urlpatterns = [
         name="tenant-domain-detail",
     ),
     
-    path("tenant-industries/", TenantIndustryListCreateAPIView.as_view(), name="tenant-industry-list-create"),
-    path("tenant-industries/<int:public_id>/", TenantIndustryRetrieveUpdateDeleteAPIView.as_view(), name="tenant-industry-detail"),
-
-    path("tenant-scopes/", TenantScopeListCreateAPIView.as_view(), name="tenant-scope-list-create"),
-    path("tenant-scopes/<int:public_id>/", TenantScopeRetrieveUpdateDeleteAPIView.as_view(), name="tenant-scope-detail"),
-
-    path("tenant-business-units/", TenantBusinessUnitListCreateAPIView.as_view(), name="tenant-business-unit-list-create"),
-    path("tenant-business-units/<int:public_id>/", TenantBusinessUnitRetrieveUpdateDeleteAPIView.as_view(), name="tenant-business-unit-detail"),
-
     path("tenant-locations/", TenantLocationListCreateAPIView.as_view(), name="tenant-location-list-create"),
     path("tenant-locations/<int:public_id>/", TenantLocationRetrieveUpdateDeleteAPIView.as_view(), name="tenant-location-detail"),
     

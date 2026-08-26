@@ -392,36 +392,6 @@ class TenantDomainSerializer(serializers.ModelSerializer):
         fields = "__all__"
         
 
-class TenantIndustrySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TenantIndustry
-        fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
-
-    # Docstring: "industry.option_set.option_type must be 'INDUSTRY' —
-    # enforce in clean()/serializer, catalog has no CHECK for it."
-    def validate_industry(self, value):
-        if getattr(value, "option_set", None) != "INDUSTRY":
-            raise serializers.ValidationError("Referenced value's option_set must be INDUSTRY.")
-        if not getattr(value, "is_active", True):
-            raise serializers.ValidationError("Referenced industry value is not active.")
-        return value
-
-
-class TenantScopeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TenantScope
-        fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
-
-
-class TenantBusinessUnitSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TenantBusinessUnit
-        fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
-
-
 class TenantLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantLocation

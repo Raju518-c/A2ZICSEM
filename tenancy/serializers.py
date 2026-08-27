@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from django.db import transaction
@@ -420,10 +421,21 @@ class TenantVerificationSerializer(serializers.ModelSerializer):
 
 
 class TenantDocumentSerializer(serializers.ModelSerializer):
+    def create(self, validated_data):
+        uploaded_file = validated_data["file"]
+        digest = hashlib.sha256()
+
+        for chunk in uploaded_file.chunks():
+            digest.update(chunk)
+
+        uploaded_file.seek(0)
+        validated_data["file_hash"] = digest.hexdigest()
+        return super().create(validated_data)
+
     class Meta:
         model = TenantDocument
         fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["file_hash", "created_at", "updated_at"]
         
 
 

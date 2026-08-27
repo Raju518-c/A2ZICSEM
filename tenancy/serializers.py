@@ -437,6 +437,47 @@ class TenantResubmitSerializer(serializers.Serializer):
     pass
 
 
+class TenantReviewDecisionSerializer(serializers.Serializer):
+    """Superadmin review decision for a tenant application.
+
+    Accepts:
+      - status: APPROVED / REJECTED / RETURNED (from TenantVerification.Status)
+      - reason: Required when status is REJECTED or RETURNED
+      - risk_classification: Optional, defaults to STANDARD
+      - next_review_date: Optional, date for periodic review
+    """
+
+    status = serializers.ChoiceField(
+        choices=[
+            ("APPROVED", "Approved"),
+            ("REJECTED", "Rejected"),
+            ("RETURNED", "Returned"),
+        ],
+        required=True,
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+    risk_classification = serializers.ChoiceField(
+        choices=[
+            ("LOW", "Low"),
+            ("STANDARD", "Standard"),
+            ("ENHANCED_REVIEW", "Enhanced Review"),
+            ("RESTRICTED", "Restricted"),
+        ],
+        required=False,
+        default="STANDARD",
+    )
+    next_review_date = serializers.DateField(required=False, allow_null=True, default=None)
+
+    def validate(self, data):
+        status = data.get("status")
+        reason = data.get("reason", "").strip()
+        if status in {"REJECTED", "RETURNED"} and not reason:
+            raise serializers.ValidationError(
+                {"reason": "Reason is required when status is REJECTED or RETURNED."}
+            )
+        return data
+
+
 class Stage1TenantDetailsSerializer(serializers.Serializer):
     """Read-only bundle of everything submitted for a tenant's Stage 1
     application — the Tenant row itself plus every related table from

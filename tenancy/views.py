@@ -1794,6 +1794,351 @@ class TenantResubmitAPIView(APIView):
         )
 
 
+def _create_stage3_records(tenant, reviewer, founding_admin):
+    """Stage 3 — System initialization.
+
+    Called inside the same transaction as Stage 2's approve decision.
+    Creates default-records for:
+      1. TenantSettings        (platform defaults)
+      2. TenantSecuritySettings (platform defaults)
+      3. TenantBranding         (empty)
+      4. TenantLegalSettings    (defaults)
+      5. TenantBilling          (empty)
+      6. TenantContact ORG_ADMIN (copied from the founding applicant)
+      7. TenantRoleAssignment   user=founding admin, role=ORG_ADMIN, granted_by=reviewer
+    """
+    created = {}
+
+    created["tenant_settings"], _ = TenantSettings.objects.get_or_create(
+        tenant=tenant,
+        defaults={
+            "default_language": "en",
+            "date_format": "DD-MM-YYYY",
+            "number_format": "1,234.56",
+            "measurement_system": "METRIC",
+            "working_calendar": "",
+        },
+    )
+
+    created["tenant_security_settings"], _ = TenantSecuritySettings.objects.get_or_create(
+        tenant=tenant,
+        defaults={
+            "mfa_policy": TenantSecuritySettings.MfaPolicy.OPTIONAL,
+            "sso_status": TenantSecuritySettings.SsoStatus.DISABLED,
+            "identity_provider": "",
+            "session_policy": {},
+            "api_access_status": TenantSecuritySettings.ApiAccessStatus.DISABLED,
+            "export_policy": {},
+        },
+    )
+
+    created["tenant_branding"], _ = TenantBranding.objects.get_or_create(
+        tenant=tenant,
+        defaults={
+            "colours": {},
+            "report_header": "",
+            "report_footer": "",
+            "disclaimer_text": "",
+        },
+    )
+
+    created["tenant_legal_settings"], _ = TenantLegalSettings.objects.get_or_create(
+        tenant=tenant,
+        defaults={
+            "nda_requirement": TenantLegalSettings.NdaRequirement.NOT_REQUIRED,
+            "default_classification": TenantLegalSettings.Classification.INTERNAL,
+            "retention_policy": "",
+            "is_legal_hold": False,
+        },
+    )
+
+    created["tenant_billing"], _ = TenantBilling.objects.get_or_create(
+        tenant=tenant,
+        defaults={
+            "po_required": False,
+            "po_format": "",
+            "po_contact": "",
+            "payment_terms": "",
+        },
+    )
+
+    if founding_admin is not None:
+        existing_org_admin_contact = TenantContact.objects.filter(
+            tenant=tenant,
+            contact_type=TenantContact.ContactType.ORG_ADMIN,
+        ).first()
+        if existing_org_admin_contact is None:
+            full_name = ""
+            email = getattr(founding_admin, "email", "") or ""
+            phone = ""
+            mobile_cc = getattr(founding_admin, "mobile_country_code", "") or ""
+            mobile_no = getattr(founding_admin, "mobile_number", "") or ""
+            if mobile_cc and mobile_no:
+                phone = f"{mobile_cc}{mobile_no}"
+            try:
+                rep = TenantAuthorisedRepresentative.objects.filter(tenant=tenant).first()
+                if rep:
+                    full_name = rep.full_name or full_name
+                    if rep.official_email:
+                        email = rep.official_email
+                    if rep.mobile:
+                        phone = rep.mobile
+            except Exception:
+                pass
+            created["tenant_contact_org_admin"] = TenantContact.objects.create(
+                tenant=tenant,
+                contact_type=TenantContact.ContactType.ORG_ADMIN,
+                user=founding_admin,
+                full_name=full_name,
+                email=email,
+                phone=phone,
+                is_active=True,
+            )
+        else:
+            created["tenant_contact_org_admin"] = existing_org_admin_contact
+
+        org_admin_role = None
+        try:
+            org_admin_role = roles.objects.filter(
+                code__iexact="ORG_ADMIN",
+            ).first()
+            if org_admin_role is None:
+                org_admin_role = roles.objects.filter(
+                    name__icontains="ORG_ADMIN",
+                ).first()
+            if org_admin_role is None:
+                org_admin_role = roles.objects.filter(
+                    roles_for__iexact="tenant admin",
+                ).first()
+            if org_admin_role is None:
+                org_admin_role = roles.objects.filter(
+                    tenant=tenant,
+                ).order_by("created").first()
+        except Exception:
+            org_admin_role = None
+
+        if org_admin_role is not None:
+            existing_assignment = TenantRoleAssignment.objects.filter(
+                user=founding_admin,
+                role=org_admin_role,
+                status="ACTIVE",
+            ).first()
+            if existing_assignment is None:
+                created["tenant_role_assignment"] = TenantRoleAssignment.objects.create(
+                    user=founding_admin,
+                    role=org_admin_role,
+                    granted_by=reviewer,
+                    status="ACTIVE",
+                )
+            else:
+                created["tenant_role_assignment"] = existing_assignment
+        else:
+            created["tenant_role_assignment"] = None
+
+    return created
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TenantReviewDecisionAPIView(APIView):
+    """
+    POST : Superadmin review decision for a tenant application.
+
+    Only accessible to a Platform Super Admin (UserTbl.is_superuser=True
+    and tenant=None — the platform-level account).
+
+    Workflow:
+      1. Validates the caller is a superadmin from UserTbl.
+      2. Loads the tenant and its LATEST TenantVerification row.
+      3. Updates that LATEST TenantVerification row in-place (NOT a new row)
+         with status, reviewed_by, reviewed_at, reason, risk_classification,
+         next_review_date.
+      4. If status == APPROVED:
+           - Tenant.status -> ACTIVE
+           - Founding legal entity -> ACTIVE + reviewed stamps
+           - Founding UserTbl approval_status -> APPROVED, is_active set
+             (only once email+mobile verified; else stays False)
+           - Stage 3 records created (TenantSettings, TenantSecuritySettings,
+             TenantBranding, TenantLegalSettings, TenantBilling,
+             TenantContact ORG_ADMIN, TenantRoleAssignment ORG_ADMIN)
+         If status == REJECTED or RETURNED:
+           - Only the latest TenantVerification is updated; no Stage 3 runs.
+
+    Expected request body (JSON):
+      {
+        "status": "APPROVED" | "REJECTED" | "RETURNED",
+        "reason": "required for REJECTED / RETURNED",
+        "risk_classification": "LOW" | "STANDARD" | "ENHANCED_REVIEW" | "RESTRICTED",
+        "next_review_date": "YYYY-MM-DD"
+      }
+    """
+
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    serializer_class = TenantReviewDecisionSerializer
+
+    @extend_schema(request=TenantReviewDecisionSerializer)
+    @transaction.atomic
+    def post(self, request, tenant_id):
+        reviewer = getattr(request, "user", None)
+        if reviewer is None or not getattr(reviewer, "is_authenticated", False):
+            from rest_framework.authtoken.models import Token
+            auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+            token_key = None
+            if auth_header.startswith("Token "):
+                token_key = auth_header.split("Token ", 1)[1].strip()
+            elif auth_header.startswith("Bearer "):
+                token_key = auth_header.split("Bearer ", 1)[1].strip()
+            if token_key:
+                try:
+                    token = Token.objects.select_related("user").get(key=token_key)
+                    reviewer = token.user
+                except Exception:
+                    reviewer = None
+
+        if reviewer is None:
+            return Response(
+                {"success": False, "message": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not getattr(reviewer, "is_superuser", False):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Only Platform Super Admin can review tenants.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if getattr(reviewer, "tenant_id", None) is not None:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Reviewer must be a platform-level (tenant=null) superadmin.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            tenant = Tenant.objects.select_related("created_by").get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        latest_verification = (
+            TenantVerification.objects.filter(tenant=tenant)
+            .order_by("-created_at")
+            .first()
+        )
+        if latest_verification is None:
+            return Response(
+                {
+                    "success": False,
+                    "message": "No TenantVerification record found for this tenant — submit first.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if latest_verification.status not in {
+            TenantVerification.Status.SUBMITTED,
+            TenantVerification.Status.UNDER_REVIEW,
+            TenantVerification.Status.RETURNED,
+        }:
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Cannot review from status={latest_verification.status}.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if latest_verification.reviewed_by_id is not None:
+            return Response(
+                {
+                    "success": False,
+                    "message": "This verification record has already been reviewed.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = TenantReviewDecisionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        decision = serializer.validated_data
+        new_status = decision["status"]
+        now = timezone.now()
+
+        latest_verification.status = new_status
+        latest_verification.reviewed_by = reviewer
+        latest_verification.reviewed_at = now
+        latest_verification.reason = decision.get("reason", "") or ""
+        latest_verification.risk_classification = decision.get("risk_classification", "STANDARD")
+        latest_verification.next_review_date = decision.get("next_review_date")
+        latest_verification.save()
+
+        stage3 = None
+        founding_admin = tenant.created_by
+
+        if new_status == "APPROVED":
+            tenant.status = Tenant.Status.ACTIVE
+            if tenant.status_reason is None or tenant.status_reason == "":
+                tenant.status_reason = "Approved via tenant review"
+            tenant.save()
+
+            founding_entity = TenantLegalEntity.objects.filter(tenant=tenant).order_by("created_at").first()
+            if founding_entity is not None and founding_entity.status != TenantLegalEntity.Status.ACTIVE:
+                founding_entity.status = TenantLegalEntity.Status.ACTIVE
+                founding_entity.reviewed_by = reviewer
+                founding_entity.reviewed_at = now
+                founding_entity.save()
+
+            if founding_admin is not None:
+                founding_admin.approval_status = UserTbl.ApprovalStatus.APPROVED
+                founding_admin.approved_by = reviewer
+                founding_admin.approved_at = now
+                email_ok = founding_admin.email_verified_at is not None
+                mobile_ok = founding_admin.mobile_verified_at is not None
+                if email_ok and mobile_ok:
+                    founding_admin.is_active = True
+                founding_admin.save()
+
+            stage3 = _create_stage3_records(tenant, reviewer, founding_admin)
+
+            for op in TenantOperation.objects.filter(tenant=tenant):
+                if op.status == TenantOperation.Status.PENDING:
+                    op.status = TenantOperation.Status.ACTIVE
+                    op.reviewed_by = reviewer
+                    op.reviewed_at = now
+                    op.save()
+
+        response_data = {
+            "verification_id": latest_verification.id,
+            "tenant_id": tenant.id,
+            "status": latest_verification.status,
+            "reviewed_by": str(getattr(reviewer, "public_id", reviewer.id)),
+            "reviewed_at": latest_verification.reviewed_at.isoformat() if latest_verification.reviewed_at else None,
+            "reason": latest_verification.reason,
+            "risk_classification": latest_verification.risk_classification,
+            "next_review_date": str(latest_verification.next_review_date) if latest_verification.next_review_date else None,
+        }
+        if stage3 is not None:
+            response_data["stage3_created"] = {k: (str(v.id) if v is not None else None) for k, v in stage3.items()}
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Tenant review decision recorded: {new_status}.",
+                "data": response_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 # ---------------------------------------------------------------------
 # TenantDocument — file upload, multipart
 # ---------------------------------------------------------------------

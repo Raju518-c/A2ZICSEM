@@ -91,6 +91,10 @@ urlpatterns = [
     path("tenant-verifications/", TenantVerificationListCreateAPIView.as_view(), name="tenant-verification-list-create"),
     path("tenant-verifications/<int:pk>/", TenantVerificationRetrieveUpdateDeleteAPIView.as_view(), name="tenant-verification-detail"),
 
+    path("tenants/<int:tenant_id>/submit/", TenantSubmitAPIView.as_view(), name="tenant-submit"),
+    path("tenants/<int:tenant_id>/resubmit/", TenantResubmitAPIView.as_view(), name="tenant-resubmit"),
+    path("tenants/<int:tenant_id>/stage1-details/", TenantStage1DetailsAPIView.as_view(), name="tenant-stage1-details"),
+
     path("tenant-documents/", TenantDocumentListCreateAPIView.as_view(), name="tenant-document-list-create"),
     path("tenant-documents/<int:pk>/", TenantDocumentRetrieveUpdateDeleteAPIView.as_view(), name="tenant-document-detail"),
     

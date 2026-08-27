@@ -1595,6 +1595,205 @@ class TenantVerificationRetrieveUpdateDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
+def _check_tenant_application_complete(tenant):
+    """Shared by TenantSubmitAPIView and TenantResubmitAPIView. Queries
+    each related table directly by tenant= rather than trusting a
+    reverse-accessor name, since TenantOwnedModel's default related_name
+    pattern varies per model and guessing it wrong fails silently.
+    """
+    missing = []
+
+    if not (tenant.name and tenant.legal_name and tenant.organisation_type
+            and tenant.industry_ids and tenant.default_timezone and tenant.default_currency):
+        missing.append("tenant_core_details")
+    if not TenantLegalEntity.objects.filter(tenant=tenant).exists():
+        missing.append("legal_entity")
+    if not TenantLocation.objects.filter(tenant=tenant, location_type=TenantLocation.LocationType.REGISTERED).exists():
+        missing.append("registered_address")
+    if not TenantAuthorisedRepresentative.objects.filter(tenant=tenant).exists():
+        missing.append("authorised_representative")
+    if not TenantDocument.objects.filter(tenant=tenant).exists():
+        missing.append("documents")
+    if not TenantLegalAcceptance.objects.filter(tenant=tenant, acceptance_type=TenantLegalAcceptance.AcceptanceType.TERMS).exists():
+        missing.append("terms_acceptance")
+    if not TenantOperation.objects.filter(tenant=tenant).exists():
+        missing.append("operating_permission")
+
+    return {"ok": not missing, "missing": missing}
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TenantSubmitAPIView(APIView):
+    """
+    POST : First-time submission of a tenant's Stage 1 application.
+
+    Checks every required related table is present (see
+    _check_tenant_application_complete). If incomplete, returns which
+    sections are missing. If complete, creates ONE new TenantVerification
+    row (status=SUBMITTED, submitted_at=now()) for this tenant.
+
+    Allowed only when this tenant has no TenantVerification row yet.
+    Once one exists, all further activity goes through
+    TenantResubmitAPIView (after RETURNED) or the review-decision
+    endpoint — never a second call here.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = TenantSubmitSerializer
+
+    @extend_schema(request=TenantSubmitSerializer)
+    def post(self, request, tenant_id):
+        try:
+            tenant = Tenant.objects.get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if TenantVerification.objects.filter(tenant=tenant).exists():
+            return Response(
+                {"success": False, "message": "This tenant has already been submitted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        completeness = _check_tenant_application_complete(tenant)
+        if not completeness["ok"]:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Tenant application incomplete.",
+                    "missing_sections": completeness["missing"],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification = TenantVerification.objects.create(
+            tenant=tenant,
+            status=TenantVerification.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Tenant application submitted for review.",
+                "data": {
+                    "verification_id": verification.id,
+                    "status": verification.status,
+                    "submitted_at": verification.submitted_at,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TenantStage1DetailsAPIView(APIView):
+    """
+    GET : Everything submitted for a tenant's Stage 1 application, in
+    one call — the Tenant row itself plus every related Stage 1 table
+    (legal entities, tax registrations, locations, authorised
+    representatives, documents, legal acceptances, operations) and a
+    compact summary of the founding admin. Read-only; returns full
+    table contents, not just status fields (that's
+    TenantVerification-based status endpoints, not this one). Mirrors
+    accounts.Stage1DetailsAPIView's shape for the professional side.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, tenant_id):
+        try:
+            tenant = Tenant.objects.select_related("created_by").get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = Stage1TenantDetailsSerializer(tenant)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Stage 1 tenant details fetched successfully.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TenantResubmitAPIView(APIView):
+    """
+    POST : Resubmit a tenant's application after a RETURNED decision.
+
+    Allowed only when the tenant's latest TenantVerification.status is
+    RETURNED — REJECTED is terminal (no resubmit), and there's nothing
+    to resubmit before a first SUBMITTED ever happens (use
+    TenantSubmitAPIView for that). Re-runs the same completeness check
+    as submit, then creates a NEW TenantVerification row (status=
+    SUBMITTED, submitted_at=now()) — the RETURNED row is left untouched
+    as history, never edited.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = TenantResubmitSerializer
+
+    @extend_schema(request=TenantResubmitSerializer)
+    def post(self, request, tenant_id):
+        try:
+            tenant = Tenant.objects.get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        latest_verification = TenantVerification.objects.filter(tenant=tenant).order_by("-created_at").first()
+        if latest_verification is None or latest_verification.status != TenantVerification.Status.RETURNED:
+            current_status = latest_verification.status if latest_verification else "NONE"
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Cannot resubmit from status={current_status}.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        completeness = _check_tenant_application_complete(tenant)
+        if not completeness["ok"]:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Tenant application still incomplete.",
+                    "missing_sections": completeness["missing"],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification = TenantVerification.objects.create(
+            tenant=tenant,
+            status=TenantVerification.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Tenant application resubmitted for review.",
+                "data": {
+                    "verification_id": verification.id,
+                    "status": verification.status,
+                    "submitted_at": verification.submitted_at,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 # ---------------------------------------------------------------------
 # TenantDocument — file upload, multipart
 # ---------------------------------------------------------------------

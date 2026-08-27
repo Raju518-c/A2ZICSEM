@@ -420,6 +420,93 @@ class TenantVerificationSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
 
 
+class TenantSubmitSerializer(serializers.Serializer):
+    """No input fields. Completeness is checked server-side against the
+    tenant's own related tables (legal entity, location, representative,
+    document, legal acceptance, operation) — nothing is accepted from the
+    request body.
+    """
+    pass
+
+
+class TenantResubmitSerializer(serializers.Serializer):
+    """No input fields. Re-runs the same completeness check as submit;
+    the corrected data itself was already saved via the individual
+    per-table endpoints before this is called.
+    """
+    pass
+
+
+class Stage1TenantDetailsSerializer(serializers.Serializer):
+    """Read-only bundle of everything submitted for a tenant's Stage 1
+    application — the Tenant row itself plus every related table from
+    the PDF's Stage 1 list, queried directly by tenant= (not through a
+    reverse-accessor name) same as _check_tenant_application_complete.
+    Mirrors accounts.Stage1DetailsSerializer's shape for the
+    professional side.
+    """
+
+    tenant = serializers.SerializerMethodField()
+    founding_admin = serializers.SerializerMethodField()
+    legal_entities = serializers.SerializerMethodField()
+    tax_registrations = serializers.SerializerMethodField()
+    locations = serializers.SerializerMethodField()
+    authorised_representatives = serializers.SerializerMethodField()
+    documents = serializers.SerializerMethodField()
+    legal_acceptances = serializers.SerializerMethodField()
+    operations = serializers.SerializerMethodField()
+
+    def get_tenant(self, obj):
+        return TenantSerializer(obj).data
+
+    def get_founding_admin(self, obj):
+        admin = obj.created_by
+        if admin is None:
+            return None
+        return {
+            "id": admin.id,
+            "email": admin.email,
+            "mobile_country_code": admin.mobile_country_code,
+            "mobile_number": admin.mobile_number,
+            "approval_status": admin.approval_status,
+        }
+
+    def get_legal_entities(self, obj):
+        return TenantLegalEntitySerializer(
+            TenantLegalEntity.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_tax_registrations(self, obj):
+        return TenantTaxRegistrationSerializer(
+            TenantTaxRegistration.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_locations(self, obj):
+        return TenantLocationSerializer(
+            TenantLocation.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_authorised_representatives(self, obj):
+        return TenantAuthorisedRepresentativeSerializer(
+            TenantAuthorisedRepresentative.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_documents(self, obj):
+        return TenantDocumentSerializer(
+            TenantDocument.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_legal_acceptances(self, obj):
+        return TenantLegalAcceptanceSerializer(
+            TenantLegalAcceptance.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+    def get_operations(self, obj):
+        return TenantOperationSerializer(
+            TenantOperation.objects.filter(tenant=obj).order_by("-created_at"), many=True
+        ).data
+
+
 class TenantDocumentSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         uploaded_file = validated_data["file"]

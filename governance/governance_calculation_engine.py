@@ -1,25 +1,32 @@
 """governance/services/calculation_engine.py
 
-The engine behind the two new endpoints:
+The engine behind three endpoints:
   1. POST /api/governance/calculated-fields/calculate/  -> system decides
-     a value from real data + admin rules, writes it to the main/related
-     table, logs CalculatedFieldValueHistory (SYSTEM_RECALCULATION).
+     ONE of the 3 genuinely rule-driven fields (QUALION_LEVEL,
+     DEPLOYABILITY_FLAG, CANDIDATE_MENTOR_CLASSIFICATION) from real data +
+     the tenant's PUBLISHED CalculationRuleSet/CalculationRule rows,
+     writes it to the main/related table, logs CalculatedFieldValueHistory
+     (SYSTEM_RECALCULATION).
   2. POST /api/governance/calculated-fields/override/    -> admin/reviewer
-     override, writes CalculatedFieldOverride, and if decision=APPROVED
-     in the same call, also writes the field + logs history
+     override, writes CalculatedFieldOverride, and if decision=APPROVED in
+     the same call, also writes the field + logs history
      (OVERRIDE_APPROVED).
+  3. POST /api/governance/calculated-fields/calculate-fixed/ -> recalculates
+     all 12 fixed-formula fields (see FIXED_FIELD_CODES) in one call for a
+     professional. These never consult CalculationRuleSet/CalculationRule —
+     per the client's own "System Calculated Fields" review sheet, they are
+     plain aggregations/templates, not tenant-tunable decisions. Only
+     Qualion Level, Deployability Flag and Candidate/Mentor Classification
+     are rule-driven; everything else here is a fixed formula keyed off the
+     "Based On" column of that sheet.
 
-Scope: only the 9 of 15 calculation_field_code values that already have a
-real destination field are wired up here (see FIELD_HANDLERS below).
-VERIFIED_PROJECT_COUNT, HIGHEST_AUTHORITY_REACHED, INDUSTRIES_SERVED,
-TOTAL_CAREER_EXPERIENCE, CREDENTIAL_STATUS (as an enum) and the enum
-version of DEPLOYABILITY_FLAG are NOT wired up because the model fields
-they'd write to don't exist yet (flagged previously). Calling the API for
-those raises CalculationError with a clear message instead of failing
-silently or guessing a field name.
+Project Responsibility Bullets writes into the existing
+experience.ProjectRecord.responsibilities field (there's no separate
+responsibility_bullets column) and, to protect candidate-entered text,
+only ever fills it when it is currently blank.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.contenttypes.models import ContentType
@@ -27,10 +34,10 @@ from django.db import models
 from django.db.models import Sum
 from django.utils import timezone
 
-from catalog.models import ReferenceValue
+from catalog.models import ReferenceValue, ScopeCatalog
 from competency.models import ProfessionalScope
 from competency.models import CompetencyAssessment
-from experience.models import ExposureLog, ProjectRecord
+from experience.models import EmploymentRecord, ExposureLog, ProjectRecord, ProjectScope
 from governance.models import (
     CalculatedFieldCode,
     CalculatedFieldValueHistory,
@@ -53,6 +60,8 @@ class CalculationError(Exception):
 SCOPED_FIELDS = {
     CalculatedFieldCode.CALENDAR_EXPERIENCE,
     CalculatedFieldCode.VERIFIED_FIELD_DAYS,
+    CalculatedFieldCode.VERIFIED_PROJECT_COUNT,
+    CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED,
     CalculatedFieldCode.QUALION_LEVEL,
     CalculatedFieldCode.DEPLOYABILITY_FLAG,
 }
@@ -61,20 +70,50 @@ PROFILE_FIELDS = {
     CalculatedFieldCode.PROFESSIONAL_SUMMARY,
     CalculatedFieldCode.PRIMARY_ROLE,
     CalculatedFieldCode.ADDITIONAL_ROLES,
+    CalculatedFieldCode.INDUSTRIES_SERVED,
+    CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE,
     CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
 }
 SUPPORTED_FIELDS = SCOPED_FIELDS | PROFILE_FIELDS
 
+# The 3 fields that are genuinely tenant-configurable decisions, driven by
+# a PUBLISHED CalculationRuleSet/CalculationRule. Everything else in
+# SUPPORTED_FIELDS is a fixed formula (see FIXED_FIELD_CODES below).
+RULE_DRIVEN_FIELDS = {
+    CalculatedFieldCode.QUALION_LEVEL,
+    CalculatedFieldCode.DEPLOYABILITY_FLAG,
+    CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
+}
+
+# The fields calculate-fixed recalculates in one call. Fixed formula/
+# template per the client's "Based On" column — never reads
+# CalculationRuleSet/CalculationRule. Deliberately excludes
+# PROJECT_RESPONSIBILITY_BULLETS: no destination field exists on
+# ProjectRecord yet, so it's reported SKIPPED rather than guessed.
+FIXED_FIELD_CODES = (SUPPORTED_FIELDS - RULE_DRIVEN_FIELDS) | {
+    CalculatedFieldCode.CREDENTIAL_STATUS,
+    CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS,
+}
+
 TARGET_FIELD_NAME = {
     CalculatedFieldCode.CALENDAR_EXPERIENCE: "calendar_experience_months",
     CalculatedFieldCode.VERIFIED_FIELD_DAYS: "verified_field_days",
+    CalculatedFieldCode.VERIFIED_PROJECT_COUNT: "verified_project_count",
+    CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED: "highest_authority_reached",
     CalculatedFieldCode.QUALION_LEVEL: "current_qualion_level",
     CalculatedFieldCode.DEPLOYABILITY_FLAG: "is_deployable",
     CalculatedFieldCode.PROFESSIONAL_HEADLINE: "headline",
     CalculatedFieldCode.PROFESSIONAL_SUMMARY: "summary",
     CalculatedFieldCode.PRIMARY_ROLE: "primary_role",
     CalculatedFieldCode.ADDITIONAL_ROLES: "additional_roles",
+    CalculatedFieldCode.INDUSTRIES_SERVED: "industries_served",
+    CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE: "total_career_experience_months",
     CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION: "current_classification",
+    # These two are per-record (many rows per professional), applied
+    # directly in calculate_fixed_fields_for_professional rather than via
+    # FIELD_HANDLERS — listed here for documentation only.
+    CalculatedFieldCode.CREDENTIAL_STATUS: "status",
+    CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS: "responsibilities",
 }
 
 # Which ReferenceValue.option_set a given context key/target field ranks against
@@ -85,6 +124,14 @@ OPTION_SET_FOR_KEY = {
 }
 
 VERIFIED_STATES = ["VERIFIED", "VALIDATED"]
+
+# Statuses the client's explicit calculate-fixed spec filters on for every
+# one of the 12 fixed fields — SELF_DECLARED/EVIDENCE_UPLOADED/VERIFIED/
+# REJECTED, i.e. everything except UNDER_REVIEW/VALIDATED. Deliberately
+# separate from VERIFIED_STATES above, which stays VERIFIED/VALIDATED-only
+# for the rule-driven fields (Qualion Level, Deployability, Classification)
+# that were NOT part of that spec and are untouched here.
+FIXED_FIELD_STATUSES = ["SELF_DECLARED", "EVIDENCE_UPLOADED", "VERIFIED", "REJECTED"]
 
 
 # ---------------------------------------------------------------------
@@ -105,52 +152,267 @@ def _merge_date_ranges_to_months(intervals):
     return max(0, round(total_days / 30.44))
 
 
-def compute_calendar_experience_months(professional, scope):
+def _span_in_months(date_pairs):
+    """date_pairs: iterable of (start_date, end_date_or_None). Per the
+    explicit spec ('order_by start_date ... from start_date of first
+    record to end_date of last record'), this is a straight span from
+    the earliest start_date to the latest end_date — missing end_date
+    (still open) treated as today — NOT a union-merge of overlapping
+    intervals like _merge_date_ranges_to_months above."""
+    pairs = list(date_pairs)
+    if not pairs:
+        return 0
     today = timezone.now().date()
-    projects = (
+    start = min(p[0] for p in pairs)
+    end = max((p[1] or today) for p in pairs)
+    return max(0, round((end - start).days / 30.44))
+
+
+def compute_calendar_experience_months(professional, scope):
+    """Based On: Project start/end dates linked to that scope. Filters
+    ProjectRecord.verification_status against FIXED_FIELD_STATUSES
+    (SELF_DECLARED/EVIDENCE_UPLOADED/VERIFIED/REJECTED, per the explicit
+    spec — broader than the VERIFIED_STATES used elsewhere in this
+    file), joined to this scope via ProjectScope. Span from the earliest
+    start_date to the latest end_date (today if still open)."""
+    records = (
         ProjectRecord.objects.filter(
             professional=professional,
             project_scopes__scope=scope,
-            project_scopes__verification_status__in=VERIFIED_STATES,
-            verification_status__in=VERIFIED_STATES,
+            verification_status__in=FIXED_FIELD_STATUSES,
         )
         .distinct()
+        .order_by("start_date")
     )
-    intervals = [
-        (p.start_date, today if p.is_current else (p.end_date or today))
-        for p in projects
-    ]
-    return _merge_date_ranges_to_months(intervals)
+    return _span_in_months((r.start_date, r.end_date) for r in records)
 
 
 def compute_verified_field_days(professional, scope):
-    total = ExposureLog.objects.filter(
-        professional=professional,
-        project_scope__scope=scope,
-        status="APPROVED",
-    ).aggregate(total=Sum("day_fraction"))["total"]
+    """Based On: Field days logged per project, verification status. SUM
+    of ProjectRecord.verified_field_days for projects in this scope —
+    per the explicit spec this reads the cached per-project field
+    directly rather than re-deriving from ExposureLog."""
+    total = (
+        ProjectRecord.objects.filter(
+            professional=professional,
+            project_scopes__scope=scope,
+            verification_status__in=FIXED_FIELD_STATUSES,
+        )
+        .distinct()
+        .aggregate(total=Sum("verified_field_days"))["total"]
+    )
     return total or Decimal("0.00")
 
 
-def compute_primary_and_additional_roles(professional, min_additional_field_days=20):
-    rows = (
+def compute_primary_and_additional_roles(professional):
+    """Based On: Verified project history per role. Groups every project
+    record (all scopes, FIXED_FIELD_STATUSES) by role_title and sums
+    each role's project duration in days ('more time taken' per the
+    explicit spec) rather than verified_field_days. Primary = the role
+    with the largest total; additional = every other distinct
+    role_title — no minimum-days floor this time."""
+    today = timezone.now().date()
+    records = ProjectRecord.objects.filter(
+        professional=professional,
+        verification_status__in=FIXED_FIELD_STATUSES,
+        role_title__isnull=False,
+    )
+    totals = {}
+    for r in records:
+        end = r.end_date or today
+        days = max(0, (end - r.start_date).days)
+        totals[r.role_title_id] = totals.get(r.role_title_id, 0) + days
+    if not totals:
+        return None, []
+    ranked = sorted(totals.items(), key=lambda kv: -kv[1])
+    primary_role_id = ranked[0][0]
+    additional_role_ids = [role_id for role_id, _ in ranked[1:]]
+    return primary_role_id, additional_role_ids
+
+
+def compute_verified_project_count(professional, scope):
+    """Based On: Projects in that scope, verification status. Count of
+    ProjectRecord rows in this scope matching FIXED_FIELD_STATUSES."""
+    return (
         ProjectRecord.objects.filter(
             professional=professional,
-            verification_status__in=VERIFIED_STATES,
-            role_title__isnull=False,
+            project_scopes__scope=scope,
+            verification_status__in=FIXED_FIELD_STATUSES,
         )
-        .values("role_title")
-        .annotate(total_days=Sum("verified_field_days"))
-        .order_by("-total_days")
+        .distinct()
+        .count()
     )
-    rows = list(rows)
-    if not rows:
-        return None, []
-    primary_role_id = rows[0]["role_title"]
-    additional_role_ids = [
-        r["role_title"] for r in rows[1:] if (r["total_days"] or 0) >= min_additional_field_days
-    ]
-    return primary_role_id, additional_role_ids
+
+
+def compute_highest_authority_reached(professional, scope):
+    """Based On: Authority level recorded per project, verification
+    status. Highest-ranked ProjectScope.authority_action ('Observed'
+    through 'Technical Authority') ever recorded for this
+    professional+scope — calculated per Industry+Scope, never as one
+    global authority (the sheet's explicit correction on this field).
+    Filters ProjectScope.verification_status, since authority_action is
+    itself a ProjectScope attribute, not a ProjectRecord one.
+
+    NOTE for whoever owns the catalog data: this field's own help_text
+    says its option_set must be AUTHORITY_STATUS, but the data it's
+    actually sourced from — ProjectScope.authority_action — is
+    documented as option_set AUTHORITY_ACTION. Ranking by sort_order
+    works regardless of option_set, so this runs fine either way, but
+    the two option_sets should be unified or explicitly mapped so the
+    ladder is unambiguous."""
+    best = (
+        ProjectScope.objects.filter(
+            project__professional=professional,
+            scope=scope,
+            verification_status__in=FIXED_FIELD_STATUSES,
+            authority_action__isnull=False,
+        )
+        .select_related("authority_action")
+        .order_by("-authority_action__sort_order")
+        .first()
+    )
+    return best.authority_action if best else None
+
+
+def compute_industries_served(professional):
+    """Based On (sheet): Verified scopes and their industries. Per the
+    explicit spec, sourced directly from ProjectRecord.industry_classification
+    (all scopes, FIXED_FIELD_STATUSES) rather than joined through
+    ProfessionalScope -> scope -> industry."""
+    codes = (
+        ProjectRecord.objects.filter(
+            professional=professional,
+            verification_status__in=FIXED_FIELD_STATUSES,
+            industry_classification__isnull=False,
+        )
+        .values_list("industry_classification__code", flat=True)
+        .distinct()
+    )
+    return sorted({c for c in codes if c})
+
+
+def compute_total_career_experience_months(professional):
+    """Based On (sheet): All job and project dates — same overlap-merge
+    method as Calendar Experience, applied person-wide. Per the explicit
+    spec given, this is computed purely from ProjectRecord across every
+    scope (no scope filter), using the same start-to-end span as Calendar
+    Experience. NOTE: EmploymentRecord dates are NOT folded in here even
+    though the sheet's own wording says 'job and project dates' — the
+    explicit spec only described project-record logic for this field; say
+    the word if EmploymentRecord should be unioned in too."""
+    records = ProjectRecord.objects.filter(
+        professional=professional,
+        verification_status__in=FIXED_FIELD_STATUSES,
+    ).order_by("start_date")
+    return _span_in_months((r.start_date, r.end_date) for r in records)
+
+
+def build_headline(professional):
+    """Based On: Verified level, industry, scope. Fixed template fill —
+    per the sheet this is 'drafted automatically... editable', not a
+    tenant-tunable rule. Level and scope come off the professional's
+    highest-ranked ProfessionalScope (same 'best_scope' pick
+    build_render_tokens uses); industry from primary_industry. Note this
+    drops primary_role from the template — the sheet's Based On column
+    for this field lists only level/industry/scope, not role."""
+    best_scope = (
+        ProfessionalScope.objects.filter(professional=professional)
+        .select_related("current_qualion_level", "scope")
+        .order_by("-current_qualion_level__sort_order")
+        .first()
+    )
+    level_label = (
+        best_scope.current_qualion_level.label
+        if best_scope and best_scope.current_qualion_level
+        else None
+    )
+    scope_label = best_scope.scope.scope_name if best_scope else None
+    industry_label = professional.primary_industry.label if professional.primary_industry_id else None
+    parts = [level_label, industry_label, scope_label]
+    return " — ".join(p for p in parts if p)
+
+
+def build_responsibility_bullets(project):
+    """Based On: Structured activity fields on each project. Composes
+    responsibilities text from role_title, each linked ProjectScope's
+    scope/authority_action/activity_summary and standards_applied —
+    drafted from structured data instead of free text, per the sheet.
+
+    CAUTION: experience.ProjectRecord.responsibilities is otherwise a
+    candidate-entered free-text field (min 100 chars, required at
+    submission) — this only ever fills it when it is currently blank.
+    An existing candidate-written value is never overwritten here."""
+    parts = []
+    if project.role_title_id:
+        parts.append(f"Worked as {project.role_title.label} on {project.project_name}.")
+    else:
+        parts.append(f"Contributed to {project.project_name}.")
+    scope_bits = []
+    for ps in project.project_scopes.select_related("scope", "authority_action").all():
+        bit = ps.scope.scope_name
+        if ps.authority_action:
+            bit += f" ({ps.authority_action.label})"
+        if ps.activity_summary:
+            bit += f": {ps.activity_summary}"
+        scope_bits.append(bit)
+    if scope_bits:
+        parts.append("Scope of work: " + "; ".join(scope_bits) + ".")
+    if project.standards_applied:
+        parts.append("Standards applied: " + ", ".join(str(s) for s in project.standards_applied) + ".")
+    return " ".join(parts)
+
+
+def build_summary(professional):
+    """Based On: The person's full structured profile. Fixed template fill
+    from key strengths, primary role, best-scope level/experience and the
+    top verified achievements — not a tenant-tunable rule. Product/copy
+    wording is intentionally simple here; refine the sentence templates as
+    needed without touching the calculation engine's plumbing."""
+    tokens = build_render_tokens(professional)
+    sentences = []
+    if tokens.get("key_strengths"):
+        sentences.append(tokens["key_strengths"].strip().rstrip("."))
+    role = tokens.get("primary_role.label")
+    level = tokens.get("current_qualion_level.label")
+    months = tokens.get("calendar_experience_months")
+    if role or level:
+        bit = f"{role or 'Professional'}"
+        if level:
+            bit += f" at {level} level"
+        if months:
+            bit += f" with {months} months' verified experience"
+        sentences.append(bit)
+    achievements = list(
+        ProjectRecord.objects.filter(
+            professional=professional, verification_status__in=FIXED_FIELD_STATUSES
+        )
+        .exclude(achievements="")
+        .order_by("-verified_field_days")
+        .values_list("achievements", flat=True)[:3]
+    )
+    sentences.extend(a.strip().rstrip(".") for a in achievements if a)
+    return ". ".join(s for s in sentences if s) + ("." if sentences else "")
+
+
+def compute_credential_status(credential, today=None):
+    """Based On: Certification expiry date vs. current date. Pure function —
+    only ever auto-transitions among ACTIVE/EXPIRING_SOON/EXPIRED. Never
+    touches SUSPENDED/REVOKED/PENDING_VERIFICATION/DRAFT/ARCHIVED: per the
+    sheet, 'an expired credential should not simply be overridden to
+    Active — corrected evidence must be supplied' via the human
+    override/evidence path instead. Returns None when nothing should
+    change."""
+    AUTO_STATES = {"ACTIVE", "EXPIRING_SOON", "EXPIRED"}
+    if credential.status not in AUTO_STATES or not credential.expiry_date:
+        return None
+    today = today or timezone.now().date()
+    if credential.expiry_date < today:
+        new_status = "EXPIRED"
+    elif credential.expiry_date <= today + timedelta(days=30):
+        new_status = "EXPIRING_SOON"
+    else:
+        new_status = "ACTIVE"
+    return new_status if new_status != credential.status else None
 
 
 # ---------------------------------------------------------------------
@@ -243,7 +505,7 @@ def render_template(template, tokens):
 # Context builders
 # ---------------------------------------------------------------------
 
-def build_scope_context(professional, scope, tenant):
+def _get_or_create_prof_scope(professional, scope, tenant):
     prof_scope, _ = ProfessionalScope.objects.get_or_create(
         professional=professional,
         scope=scope,
@@ -257,6 +519,11 @@ def build_scope_context(professional, scope, tenant):
             ).first(),
         },
     )
+    return prof_scope
+
+
+def build_scope_context(professional, scope, tenant):
+    prof_scope = _get_or_create_prof_scope(professional, scope, tenant)
     has_active_cert = CredentialRecord.objects.filter(
         professional=professional,
         record_type="CERTIFICATION",
@@ -428,19 +695,86 @@ def _handle_rule_based_profile_field(professional, calculation_field_code, field
 
 
 def handle_headline(professional, scope, tenant):
-    tokens = build_render_tokens(professional)
-    context = {"min_completeness_percent": 100}  # headline rule conditions are template-only in practice
-    return _handle_rule_based_profile_field(
-        professional, CalculatedFieldCode.PROFESSIONAL_HEADLINE, "headline", context, tokens
-    )
+    value = build_headline(professional)
+    return {
+        "target_instance": professional,
+        "field_name": "headline",
+        "resolved_value": value,
+        "new_value_raw": value,
+        "ruleset_version": "",
+        "rule_label": "system template (level — industry — scope)",
+    }
 
 
 def handle_summary(professional, scope, tenant):
-    tokens = build_render_tokens(professional)
-    context = {"min_completeness_percent": 100}
-    return _handle_rule_based_profile_field(
-        professional, CalculatedFieldCode.PROFESSIONAL_SUMMARY, "summary", context, tokens
-    )
+    value = build_summary(professional)
+    # summary_source rides along on the same instance/save() as "summary" —
+    # apply_calculated_value's target_instance.save() persists the whole
+    # row, not just field_name, so setting it here is enough (item 6.1).
+    professional.summary_source = ProfessionalProfile.SummarySource.SYSTEM_GENERATED
+    return {
+        "target_instance": professional,
+        "field_name": "summary",
+        "resolved_value": value,
+        "new_value_raw": value,
+        "ruleset_version": "",
+        "rule_label": "system template (strengths + role/level + top achievements); summary_source -> SYSTEM_GENERATED",
+    }
+
+
+def handle_verified_project_count(professional, scope, tenant):
+    prof_scope = _get_or_create_prof_scope(professional, scope, tenant)
+    value = compute_verified_project_count(professional, scope)
+    return {
+        "target_instance": prof_scope,
+        "field_name": "verified_project_count",
+        "resolved_value": value,
+        "new_value_raw": value,
+        "ruleset_version": "",
+        "rule_label": "system aggregation (count of distinct verified projects)",
+    }
+
+
+def handle_highest_authority_reached(professional, scope, tenant):
+    prof_scope = _get_or_create_prof_scope(professional, scope, tenant)
+    resolved = compute_highest_authority_reached(professional, scope)
+    if resolved is None:
+        raise CalculationError(
+            "No ProjectScope with an authority_action found for this "
+            "professional+scope yet (checked FIXED_FIELD_STATUSES)."
+        )
+    return {
+        "target_instance": prof_scope,
+        "field_name": "highest_authority_reached",
+        "resolved_value": resolved,
+        "new_value_raw": {"code": resolved.code},
+        "ruleset_version": "",
+        "rule_label": "system aggregation (max-rank ProjectScope.authority_action ever recorded)",
+    }
+
+
+def handle_industries_served(professional, scope, tenant):
+    codes = compute_industries_served(professional)
+    return {
+        "target_instance": professional,
+        "field_name": "industries_served",
+        "resolved_value": codes,
+        "new_value_raw": codes,
+        "ruleset_version": "",
+        "rule_label": "system aggregation (distinct industries behind verified scopes)",
+    }
+
+
+def handle_total_career_experience(professional, scope, tenant):
+    value = compute_total_career_experience_months(professional)
+    return {
+        "target_instance": professional,
+        "field_name": "total_career_experience_months",
+        "resolved_value": value,
+        "new_value_raw": value,
+        "ruleset_version": "",
+        "rule_label": "system aggregation (union of verified employment dates, person-wide)",
+    }
 
 
 def handle_primary_role(professional, scope, tenant):
@@ -484,12 +818,16 @@ def handle_classification(professional, scope, tenant):
 FIELD_HANDLERS = {
     CalculatedFieldCode.CALENDAR_EXPERIENCE: handle_calendar_experience,
     CalculatedFieldCode.VERIFIED_FIELD_DAYS: handle_verified_field_days,
+    CalculatedFieldCode.VERIFIED_PROJECT_COUNT: handle_verified_project_count,
+    CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED: handle_highest_authority_reached,
     CalculatedFieldCode.QUALION_LEVEL: handle_qualion_level,
     CalculatedFieldCode.DEPLOYABILITY_FLAG: handle_deployability,
     CalculatedFieldCode.PROFESSIONAL_HEADLINE: handle_headline,
     CalculatedFieldCode.PROFESSIONAL_SUMMARY: handle_summary,
     CalculatedFieldCode.PRIMARY_ROLE: handle_primary_role,
     CalculatedFieldCode.ADDITIONAL_ROLES: handle_additional_roles,
+    CalculatedFieldCode.INDUSTRIES_SERVED: handle_industries_served,
+    CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE: handle_total_career_experience,
     CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION: handle_classification,
 }
 
@@ -584,3 +922,181 @@ def apply_calculated_value(
         recalculation_ruleset_version=ruleset_version or "",
     )
     return previous_raw, history
+
+
+# ---------------------------------------------------------------------
+# calculate-fixed: one call, all 11 fixed-formula fields, no rule set
+# ---------------------------------------------------------------------
+
+def _run_one_fixed_field(professional, scope, tenant, calculation_field_code):
+    """Runs a single FIXED_FIELD_CODES handler + apply_calculated_value,
+    normalising success/failure into one result dict instead of raising —
+    so one field failing (e.g. no verified data yet) doesn't abort the rest
+    of the batch."""
+    try:
+        result = FIELD_HANDLERS[calculation_field_code](professional, scope, tenant)
+        previous_raw, history = apply_calculated_value(
+            tenant=tenant,
+            professional=professional,
+            target_instance=result["target_instance"],
+            field_name=result["field_name"],
+            calculation_field_code=calculation_field_code,
+            resolved_value=result["resolved_value"],
+            new_value_raw=result["new_value_raw"],
+            ruleset_version=result["ruleset_version"],
+            change_source="SYSTEM_RECALCULATION",
+        )
+        return {
+            "calculation_field_code": calculation_field_code,
+            "status": "SAVED",
+            "scope": scope.pk if scope else None,
+            "field_name": result["field_name"],
+            "previous_value": previous_raw,
+            "new_value": result["new_value_raw"],
+            "rule_applied": result["rule_label"],
+            "history_id": history.pk,
+        }
+    except CalculationError as exc:
+        return {
+            "calculation_field_code": calculation_field_code,
+            "status": "ERROR",
+            "scope": scope.pk if scope else None,
+            "message": str(exc),
+        }
+
+
+def calculate_fixed_fields_for_professional(professional, scopes=None):
+    """Recalculates all 12 fixed-formula fields for one professional in a
+    single pass:
+      - Scope-level fields (Calendar Experience, Verified Field Days,
+        Verified Project Count, Highest Authority Reached) run once per
+        scope. Defaults to every distinct ScopeCatalog behind this
+        professional's ProjectScope rows (i.e. discovered from their
+        project experience, not from pre-existing ProfessionalScope
+        rows) — a ProfessionalScope row is created for each one that
+        doesn't already exist. Pass explicit ScopeCatalog instances to
+        override that discovery.
+      - Profile-level fields (Headline, Summary, Primary Role, Additional
+        Roles, Industries Served, Total Career Experience) run once.
+      - Credential Status runs once per ACTIVE/EXPIRING_SOON/EXPIRED
+        CredentialRecord with an expiry_date, each logged against that
+        credential row.
+      - Project Responsibility Bullets runs once per ProjectRecord whose
+        responsibilities field is currently blank (never overwrites an
+        existing candidate-written value), each logged against that
+        project row.
+
+    Returns a dict: {"scopes": [...], "profile": [...],
+    "credentials": [...], "responsibilities": [...]}, each entry shaped
+    like one field's result.
+    """
+    tenant = professional.tenant
+    if scopes is None:
+        scope_ids = (
+            ProjectScope.objects.filter(project__professional=professional)
+            .values_list("scope_id", flat=True)
+            .distinct()
+        )
+        scopes = list(ScopeCatalog.objects.filter(pk__in=scope_ids))
+
+    scope_results = []
+    for scope in scopes:
+        for code in (
+            CalculatedFieldCode.CALENDAR_EXPERIENCE,
+            CalculatedFieldCode.VERIFIED_FIELD_DAYS,
+            CalculatedFieldCode.VERIFIED_PROJECT_COUNT,
+            CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED,
+        ):
+            scope_results.append(_run_one_fixed_field(professional, scope, tenant, code))
+
+    profile_results = [
+        _run_one_fixed_field(professional, None, tenant, code)
+        for code in (
+            CalculatedFieldCode.PROFESSIONAL_HEADLINE,
+            CalculatedFieldCode.PROFESSIONAL_SUMMARY,
+            CalculatedFieldCode.PRIMARY_ROLE,
+            CalculatedFieldCode.ADDITIONAL_ROLES,
+            CalculatedFieldCode.INDUSTRIES_SERVED,
+            CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE,
+        )
+    ]
+
+    credential_results = []
+    for credential in CredentialRecord.objects.filter(
+        professional=professional,
+        status__in=["ACTIVE", "EXPIRING_SOON", "EXPIRED"],
+        expiry_date__isnull=False,
+    ):
+        new_status = compute_credential_status(credential)
+        if new_status is None:
+            continue
+        previous_raw, history = apply_calculated_value(
+            tenant=tenant,
+            professional=professional,
+            target_instance=credential,
+            field_name="status",
+            calculation_field_code=CalculatedFieldCode.CREDENTIAL_STATUS,
+            resolved_value=new_status,
+            new_value_raw=new_status,
+            ruleset_version="",
+            change_source="SYSTEM_RECALCULATION",
+        )
+        credential_results.append(
+            {
+                "calculation_field_code": CalculatedFieldCode.CREDENTIAL_STATUS,
+                "status": "SAVED",
+                "credential_id": credential.pk,
+                "field_name": "status",
+                "previous_value": previous_raw,
+                "new_value": new_status,
+                "rule_applied": "system aggregation (expiry date vs. today)",
+                "history_id": history.pk,
+            }
+        )
+
+    responsibility_results = []
+    for project in ProjectRecord.objects.filter(professional=professional, responsibilities=""):
+        text = build_responsibility_bullets(project)
+        if len(text) < 100:
+            responsibility_results.append(
+                {
+                    "calculation_field_code": CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS,
+                    "status": "ERROR",
+                    "project_id": project.pk,
+                    "message": "Not enough structured data (role_title/project_scopes/"
+                    "standards_applied) to draft the required 100+ characters; "
+                    "needs candidate input instead.",
+                }
+            )
+            continue
+        previous_raw, history = apply_calculated_value(
+            tenant=tenant,
+            professional=professional,
+            target_instance=project,
+            field_name="responsibilities",
+            calculation_field_code=CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS,
+            resolved_value=text,
+            new_value_raw=text,
+            ruleset_version="",
+            change_source="SYSTEM_RECALCULATION",
+        )
+        responsibility_results.append(
+            {
+                "calculation_field_code": CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS,
+                "status": "SAVED",
+                "project_id": project.pk,
+                "field_name": "responsibilities",
+                "previous_value": previous_raw,
+                "new_value": text,
+                "rule_applied": "system template (role + scope/authority + standards_applied); "
+                "only fills a currently-blank responsibilities field",
+                "history_id": history.pk,
+            }
+        )
+
+    return {
+        "scopes": scope_results,
+        "profile": profile_results,
+        "credentials": credential_results,
+        "responsibilities": responsibility_results,
+    }

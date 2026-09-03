@@ -14,6 +14,8 @@ from professionals.models import *
 from resumes.models import *
 from tenancy.models import *
 
+from competency.models import *
+from .models import *
 
 class DynamicTableQueryItemSerializer(serializers.Serializer):
     table = serializers.CharField(required=True)
@@ -101,6 +103,11 @@ class CoreProfessionalReviewSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class CoreProfessionalScopeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProfessionalScope
+        fields = "__all__"
+        
 class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
     user = CoreUserTblSerializer(read_only=True)
     registration = CoreRegistrationApplicationSerializer(read_only=True)
@@ -112,6 +119,7 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
     contacts = CoreContactRecordSerializer(many=True, read_only=True)
     evidence_documents = CoreEvidenceDocumentSerializer(many=True, read_only=True)
     reviews = CoreProfessionalReviewSerializer(many=True, read_only=True)
+    scopes = CoreProfessionalScopeSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProfessionalProfile
@@ -181,6 +189,7 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
             "contacts",
             "evidence_documents",
             "reviews",
+            "scopes",
             "created_at",
             "updated_at",
         )
@@ -189,4 +198,62 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
 # Backward-compatible aliases for the project-wide serializer usage that already
 # exists in other apps.
 ProfessionalProfileSerializer = CoreProfessionalProfileRelatedSerializer
+
+
+
+class TenantRegistrationInviteSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = TenantRegistrationInvite
+
+        fields = [
+            "id",
+            "email",
+            "invitation_date_time",
+            "is_registered",
+            "registered_date_time",
+            "invitation_token",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "invitation_date_time",
+            "is_registered",
+            "registered_date_time",
+            "invitation_token",
+            "created_at",
+            "updated_at",
+        ]
+
+class TenantRegistrationInviteCreateSerializer(serializers.Serializer):
+
+    email = serializers.EmailField(
+        required=True
+    )
+
+    registration_url = serializers.URLField(
+        required=True
+    )
+
+    description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True
+    )
+
+    registered_industry = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=255
+    )
+
+    def validate_email(self, value):
+        return value.lower().strip()
+
+    def validate_registration_url(self, value):
+        return value.rstrip("/")
+
 

@@ -64,6 +64,25 @@ class EmploymentRecord(TenantOwnedModel, TimeStampedModel):
         help_text="Permanent, contract, rotation, freelance, etc. "
         "option_set must be ENGAGEMENT_TYPE.",
     )
+    
+    # industry_classification = models.ForeignKey(
+    #     "catalog.referencevalue",
+    #     on_delete=models.PROTECT,
+    #     null=True,
+    #     blank=True,
+    #     related_name="project_records",
+    #     help_text="Related industry; used for classification and reporting.",
+    # )
+    
+    # scope = models.ForeignKey(
+    #     "catalog.ScopeCatalog",
+    #     on_delete=models.PROTECT,
+    #     related_name="project_scopes",
+    #     db_index=True,
+    #     help_text="Scope performed on project; active scope, registration "
+    #     "industry does not limit later verified scopes.",
+    # )
+    
     country_code = models.CharField(max_length=2, blank=True, help_text="Employment country.")
     city = models.CharField(max_length=120, blank=True, help_text="Employment city.")
     start_date = models.DateField(help_text="Employment start date; cannot be after end_date.")

@@ -76,6 +76,11 @@ urlpatterns = [
         name="calculated-field-calculate",
     ),
     path(
+        "calculated-fields/calculate-fixed/",
+        CalculateFixedSystemFieldsAPIView.as_view(),
+        name="calculated-field-calculate-fixed",
+    ),
+    path(
         "calculated-fields/override/",
         OverrideCalculatedFieldAPIView.as_view(),
         name="calculated-field-override",

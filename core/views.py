@@ -5,7 +5,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -20,8 +20,12 @@ from governance.models import *
 from professionals.models import *
 from resumes.models import *
 from tenancy.models import *
-
+from .models import *
 from .serializers import *
+
+from .utils import (
+    send_tenant_registration_invitation_email,
+)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -368,3 +372,901 @@ class GlobalDynamicTableFilterAPIView(APIView):
             )
 
         return Response({"success": True, "data": results}, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantRegistrationInviteListCreateAPIView(APIView):
+    """
+    GET:
+        Get all tenant registration invitations.
+
+    POST:
+        Create a tenant registration invitation
+        and send registration email.
+
+    Frontend POST payload:
+
+    {
+        "email": "tenant@example.com",
+        "registration_url": "http://localhost:3000/tenant/register/"
+    }
+
+    Backend automatically:
+
+    1. Checks whether tenant already exists.
+    2. Checks whether an active invitation already exists.
+    3. Creates invitation.
+    4. Generates invitation token.
+    5. Generates tokenized registration URL.
+    6. Sends registration email.
+    """
+
+    permission_classes = [AllowAny]
+
+    # ======================================================
+    # GET - ALL INVITATIONS
+    # ======================================================
+
+    @extend_schema(
+        responses=TenantRegistrationInviteSerializer
+    )
+    def get(self, request):
+
+        invites = TenantRegistrationInvite.objects.all()
+
+        serializer = TenantRegistrationInviteSerializer(
+            invites,
+            many=True
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitations "
+                    "fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ======================================================
+    # POST - CREATE INVITATION
+    # ======================================================
+
+    @extend_schema(
+        request=TenantRegistrationInviteCreateSerializer,
+        responses={
+            201: OpenApiResponse(
+                description=(
+                    "Tenant registration invitation(s) created "
+                    "and email(s) sent successfully."
+                )
+            ),
+            207: OpenApiResponse(
+                description=(
+                    "Some invitations were created successfully "
+                    "while others failed."
+                )
+            ),
+            400: OpenApiResponse(
+                description="Validation error."
+            ),
+            500: OpenApiResponse(
+                description="Email sending failed."
+            ),
+        },
+    )
+    def post(self, request):
+
+        # ==================================================
+        # DETECT SINGLE OR MULTIPLE PAYLOAD
+        # ==================================================
+
+        is_multiple = isinstance(request.data, list)
+
+        serializer = TenantRegistrationInviteCreateSerializer(
+            data=request.data,
+            many=is_multiple
+        )
+
+        # ==================================================
+        # VALIDATE REQUEST
+        # ==================================================
+
+        if not serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Validation failed.",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ==================================================
+        # NORMALIZE DATA INTO LIST
+        # ==================================================
+
+        if is_multiple:
+            invitation_records = serializer.validated_data
+        else:
+            invitation_records = [
+                serializer.validated_data
+            ]
+
+        # ==================================================
+        # RESULT COLLECTION
+        # ==================================================
+
+        success_records = []
+        failed_records = []
+
+        # Used to prevent duplicate email in same payload
+        processed_emails = set()
+
+        # ==================================================
+        # PROCESS EACH INVITATION
+        # ==================================================
+
+        for item in invitation_records:
+
+            email = item["email"].lower().strip()
+
+            registration_base_url = (
+                item["registration_url"].rstrip("/")
+            )
+
+            description = item.get(
+                "description"
+            )
+
+            registered_industry = item.get(
+                "registered_industry"
+            )
+
+            # ==================================================
+            # CHECK DUPLICATE EMAIL INSIDE SAME REQUEST
+            # ==================================================
+
+            if email in processed_emails:
+
+                failed_records.append(
+                    {
+                        "email": email,
+                        "message": (
+                            "Duplicate email found in "
+                            "the same request."
+                        ),
+                    }
+                )
+
+                continue
+
+            processed_emails.add(email)
+
+            # ==================================================
+            # CHECK IF ALREADY REGISTERED
+            # ==================================================
+
+            existing_registered_invite = (
+                TenantRegistrationInvite.objects.filter(
+                    email__iexact=email,
+                    is_registered=True
+                )
+                .select_related("tenant_rec")
+                .order_by("-registered_date_time")
+                .first()
+            )
+
+            if existing_registered_invite:
+
+                failed_records.append(
+                    {
+                        "email": email,
+                        "message": (
+                            "A tenant is already registered "
+                            "with this email."
+                        ),
+                        "tenant_id": (
+                            str(
+                                existing_registered_invite
+                                .tenant_rec_id
+                            )
+                            if existing_registered_invite
+                            .tenant_rec_id
+                            else None
+                        ),
+                        "invite_id": (
+                            existing_registered_invite.id
+                        ),
+                        "is_registered": True,
+                        "registered_date_time": (
+                            existing_registered_invite
+                            .registered_date_time
+                        ),
+                    }
+                )
+
+                continue
+
+            # ==================================================
+            # CHECK EXISTING ACTIVE INVITATION
+            # ==================================================
+
+            existing_invite = (
+                TenantRegistrationInvite.objects.filter(
+                    email__iexact=email,
+                    is_registered=False
+                )
+                .order_by("-invitation_date_time")
+                .first()
+            )
+
+            if existing_invite:
+
+                failed_records.append(
+                    {
+                        "email": email,
+                        "message": (
+                            "An active tenant registration "
+                            "invitation already exists for "
+                            "this email."
+                        ),
+                        "invite_id": (
+                            existing_invite.id
+                        ),
+                        "is_registered": (
+                            existing_invite.is_registered
+                        ),
+                        "invitation_date_time": (
+                            existing_invite
+                            .invitation_date_time
+                        ),
+                        "invitation_token": str(
+                            existing_invite
+                            .invitation_token
+                        ),
+                    }
+                )
+
+                continue
+
+            # ==================================================
+            # CREATE INVITATION
+            # ==================================================
+
+            invite = (
+                TenantRegistrationInvite.objects.create(
+                    email=email,
+                    description=description,
+                    registered_industry=registered_industry,
+                )
+            )
+
+            # ==================================================
+            # GENERATE TOKENIZED REGISTRATION URL
+            # ==================================================
+
+            registration_url = (
+                f"{registration_base_url}"
+                f"/?token={invite.invitation_token}"
+            )
+
+            # ==================================================
+            # EMAIL SUBJECT
+            # ==================================================
+
+            subject = (
+                "Welcome to A2Z - Tenant Registration"
+            )
+
+            # ==================================================
+            # EMAIL MESSAGE
+            # ==================================================
+
+            message = (
+                "Hello,\n\n"
+                "You have been invited to register as a "
+                "tenant on A2Z.\n\n"
+                "Please complete your tenant registration "
+                "using the link below:\n\n"
+                f"{registration_url}\n\n"
+                "Please do not share this registration link "
+                "with anyone else.\n\n"
+                "Thank you,\n"
+                "A2Z Team"
+            )
+
+            # ==================================================
+            # SEND EMAIL
+            # ==================================================
+
+            try:
+
+                send_tenant_registration_invitation_email(
+                    email=invite.email,
+                    subject=subject,
+                    message=message,
+                )
+
+            except Exception as e:
+
+                # Delete invitation when email sending fails
+                invite.delete()
+
+                failed_records.append(
+                    {
+                        "email": email,
+                        "message": (
+                            "Failed to send tenant "
+                            "registration invitation email."
+                        ),
+                        "error": str(e),
+                    }
+                )
+
+                continue
+
+            # ==================================================
+            # SUCCESS RECORD
+            # ==================================================
+
+            success_records.append(
+                {
+                    "id": invite.id,
+                    "email": invite.email,
+                    "description": invite.description,
+                    "registered_industry": (
+                        invite.registered_industry
+                    ),
+                    "invitation_date_time": (
+                        invite.invitation_date_time
+                    ),
+                    "is_registered": (
+                        invite.is_registered
+                    ),
+                    "registered_date_time": (
+                        invite.registered_date_time
+                    ),
+                    "tenant_rec": (
+                        str(invite.tenant_rec_id)
+                        if invite.tenant_rec_id
+                        else None
+                    ),
+                    "invitation_token": str(
+                        invite.invitation_token
+                    ),
+                    "registration_url": (
+                        registration_url
+                    ),
+                    "email_subject": subject,
+                    "email_message": message,
+                }
+            )
+
+        # ==================================================
+        # SINGLE RECORD RESPONSE
+        # ==================================================
+
+        if not is_multiple:
+
+            if success_records:
+
+                return Response(
+                    {
+                        "success": True,
+                        "message": (
+                            "Tenant registration invitation "
+                            "created and email sent successfully."
+                        ),
+                        "data": success_records[0],
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        failed_records[0].get(
+                            "message",
+                            "Failed to create invitation."
+                        )
+                    ),
+                    "data": failed_records[0],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ==================================================
+        # MULTIPLE RECORD RESPONSE
+        # ==================================================
+
+        total_records = len(invitation_records)
+        success_count = len(success_records)
+        failed_count = len(failed_records)
+
+        # --------------------------------------------------
+        # ALL SUCCESS
+        # --------------------------------------------------
+
+        if failed_count == 0:
+
+            return Response(
+                {
+                    "success": True,
+                    "message": (
+                        "All tenant registration invitations "
+                        "were created and emails sent "
+                        "successfully."
+                    ),
+                    "summary": {
+                        "total": total_records,
+                        "success": success_count,
+                        "failed": failed_count,
+                    },
+                    "data": {
+                        "successful": success_records,
+                        "failed": [],
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        # --------------------------------------------------
+        # ALL FAILED
+        # --------------------------------------------------
+
+        if success_count == 0:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "No tenant registration invitations "
+                        "were created."
+                    ),
+                    "summary": {
+                        "total": total_records,
+                        "success": success_count,
+                        "failed": failed_count,
+                    },
+                    "data": {
+                        "successful": [],
+                        "failed": failed_records,
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --------------------------------------------------
+        # PARTIAL SUCCESS
+        # --------------------------------------------------
+
+        return Response(
+            {
+                "success": True,
+                "partial_success": True,
+                "message": (
+                    "Some tenant registration invitations "
+                    "were created successfully while "
+                    "others failed."
+                ),
+                "summary": {
+                    "total": total_records,
+                    "success": success_count,
+                    "failed": failed_count,
+                },
+                "data": {
+                    "successful": success_records,
+                    "failed": failed_records,
+                },
+            },
+            status=status.HTTP_207_MULTI_STATUS,
+        )
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantRegistrationInviteDetailAPIView(APIView):
+    """
+    GET    : Get one tenant registration invitation
+    PUT    : Update invitation email
+    PATCH  : Partially update invitation email
+    DELETE : Delete invitation
+    """
+
+    permission_classes = [AllowAny]
+
+    # ======================================================
+    # GET
+    # ======================================================
+
+    @extend_schema(
+        responses=TenantRegistrationInviteSerializer
+    )
+    def get(self, request, pk):
+
+        invite = get_object_or_404(
+            TenantRegistrationInvite,
+            pk=pk
+        )
+
+        serializer = TenantRegistrationInviteSerializer(
+            invite
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitation "
+                    "fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ======================================================
+    # PUT
+    # ======================================================
+
+    @extend_schema(
+        request=TenantRegistrationInviteCreateSerializer,
+        responses=TenantRegistrationInviteSerializer,
+    )
+    def put(self, request, pk):
+
+        invite = get_object_or_404(
+            TenantRegistrationInvite,
+            pk=pk
+        )
+
+        serializer = TenantRegistrationInviteCreateSerializer(
+            invite,
+            data=request.data
+        )
+
+        if not serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Validation failed.",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invite = serializer.save()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitation "
+                    "updated successfully."
+                ),
+                "data": TenantRegistrationInviteSerializer(
+                    invite
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ======================================================
+    # PATCH
+    # ======================================================
+
+    @extend_schema(
+        request=TenantRegistrationInviteCreateSerializer,
+        responses=TenantRegistrationInviteSerializer,
+    )
+    def patch(self, request, pk):
+
+        invite = get_object_or_404(
+            TenantRegistrationInvite,
+            pk=pk
+        )
+
+        serializer = TenantRegistrationInviteCreateSerializer(
+            invite,
+            data=request.data,
+            partial=True
+        )
+
+        if not serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Validation failed.",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invite = serializer.save()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitation "
+                    "updated successfully."
+                ),
+                "data": TenantRegistrationInviteSerializer(
+                    invite
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ======================================================
+    # DELETE
+    # ======================================================
+
+    @extend_schema(
+        responses={
+            204: OpenApiResponse(
+                description=(
+                    "Tenant registration invitation "
+                    "deleted successfully."
+                )
+            )
+        }
+    )
+    def delete(self, request, pk):
+
+        invite = get_object_or_404(
+            TenantRegistrationInvite,
+            pk=pk
+        )
+
+        invite.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitation "
+                    "deleted successfully."
+                ),
+            },
+            status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantRegistrationInviteByTokenAPIView(APIView):
+    """
+    GET:
+        Validate tenant registration invitation using token.
+
+    If invitation is NOT registered:
+        Return registration URL.
+
+    If invitation is already registered:
+        Return the registered Tenant record.
+
+    URL:
+        GET /tenant-registration-invite/<token>/
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                description=(
+                    "Invitation token validated successfully."
+                )
+            ),
+            404: OpenApiResponse(
+                description="Invalid invitation token."
+            ),
+        }
+    )
+    def get(self, request, token):
+
+        # ==================================================
+        # FIND INVITATION BY TOKEN
+        # ==================================================
+
+        invite = (
+            TenantRegistrationInvite.objects
+            .select_related("tenant_rec")
+            .filter(
+                invitation_token=token
+            )
+            .first()
+        )
+
+        # ==================================================
+        # INVALID TOKEN
+        # ==================================================
+
+        if not invite:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "no tenant registration invitation."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ==================================================
+        # ALREADY REGISTERED
+        # ==================================================
+
+        if invite.is_registered:
+
+            # ----------------------------------------------
+            # Check whether tenant is linked
+            # ----------------------------------------------
+
+            if not invite.tenant_rec:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "This invitation is already "
+                            "registered, but the associated "
+                            "tenant record was not found."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tenant = invite.tenant_rec
+
+            # ----------------------------------------------
+            # Return registered tenant
+            # ----------------------------------------------
+
+            return Response(
+                {
+                    "success": True,
+                    "message": (
+                        "Tenant registration is already "
+                        "completed."
+                    ),
+                    "registered": True,
+                    "data": {
+                        "invitation": {
+                            "id": invite.id,
+                            "email": invite.email,
+                            "is_registered": (
+                                invite.is_registered
+                            ),
+                            "registered_date_time": (
+                                invite.registered_date_time
+                            ),
+                            "invitation_token": str(
+                                invite.invitation_token
+                            ),
+                        },
+                        "tenant": {
+                            "id": str(tenant.id),
+                            "name": tenant.name,
+                            "code": tenant.code,
+                            "workspace_type": (
+                                tenant.workspace_type
+                            ),
+                            "legal_name": tenant.legal_name,
+                            "trade_name": tenant.trade_name,
+                            "organisation_type": (
+                                tenant.organisation_type
+                            ),
+                            "description": tenant.description,
+                            "website": tenant.website,
+                            "industry_ids": tenant.industry_ids,
+                            "service_scope_ids": (
+                                tenant.service_scope_ids
+                            ),
+                            "portal_slug": tenant.portal_slug,
+                            "custom_domain": (
+                                tenant.custom_domain
+                            ),
+                            "status": tenant.status,
+                            "registration_enabled": (
+                                tenant.registration_enabled
+                            ),
+                            "login_enabled": (
+                                tenant.login_enabled
+                            ),
+                            "default_timezone": (
+                                tenant.default_timezone
+                            ),
+                            "default_currency": (
+                                tenant.default_currency
+                            ),
+                            "contact_email": (
+                                tenant.contact_email
+                            ),
+                            "contact_phone": (
+                                tenant.contact_phone
+                            ),
+                            "settings": tenant.settings,
+                            "branding": tenant.branding,
+                            "logo": (
+                                tenant.logo.url
+                                if tenant.logo
+                                else None
+                            ),
+                            "status_reason": (
+                                tenant.status_reason
+                            ),
+                            "created_by": (
+                                str(tenant.created_by_id)
+                                if tenant.created_by_id
+                                else None
+                            ),
+                            "created_at": (
+                                tenant.created_at
+                            ),
+                            "updated_at": (
+                                tenant.updated_at
+                            ),
+                        },
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ==================================================
+        # NOT REGISTERED
+        # ==================================================
+
+        # Build registration URL
+        #
+        # This should be the same base URL used when
+        # creating the invitation.
+
+        # If you want the frontend URL to be stored in the
+        # invitation table, add a registration_url field.
+        #
+        # Otherwise, use your configured frontend URL.
+
+        # registration_base_url = (
+        #     "http://localhost:3000/tenant/register/"
+        # )
+
+        # registration_url = (
+        #     f"{registration_base_url}"
+        #     f"?token={invite.invitation_token}"
+        # )
+
+        # ==================================================
+        # RETURN REGISTRATION URL
+        # ==================================================
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant registration invitation "
+                    "is valid."
+                ),
+                "registered": False,
+                "data": {
+                    "invite_id": invite.id,
+                    "email": invite.email,
+                    "is_registered": (
+                        invite.is_registered
+                    ),                   
+                    "invitation_token": str(
+                        invite.invitation_token
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+

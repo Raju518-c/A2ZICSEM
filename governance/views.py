@@ -735,9 +735,11 @@ from governance.models import CalculatedFieldCode, CalculatedFieldOverride
 from governance.serializers import CalculatedFieldOverrideSerializer
 from .governance_calculation_engine import (
     FIELD_HANDLERS,
+    FIXED_FIELD_CODES,
     SCOPED_FIELDS,
     CalculationError,
     apply_calculated_value,
+    calculate_fixed_fields_for_professional,
 )
 from professionals.models import ProfessionalProfile
 
@@ -1002,8 +1004,103 @@ class OverrideCalculatedFieldAPIView(APIView):
         )
 
 
+# ============================================================
+# 3. Recalculate all 11 fixed-formula fields for a professional in one
+#    call. None of these read CalculationRuleSet/CalculationRule — see
+#    FIXED_FIELD_CODES in governance_calculation_engine.py. The 3
+#    genuinely rule-driven fields (QUALION_LEVEL, DEPLOYABILITY_FLAG,
+#    CANDIDATE_MENTOR_CLASSIFICATION) are NOT touched here; keep using
+#    CalculateSystemFieldAPIView for those.
+# ============================================================
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class CalculateFixedSystemFieldsAPIView(APIView):
+    """
+    POST : Recalculate every fixed-formula system-calculated field for one
+    professional and save each straight into its destination table,
+    logging one CalculatedFieldValueHistory row per field
+    (change_source=SYSTEM_RECALCULATION). Covers:
 
+      Scoped (per Industry/Scope):
+        Calendar Experience, Verified Field Days, Verified Project Count,
+        Highest Authority Reached
+      Profile-wide:
+        Professional Headline, Professional Summary, Primary Role,
+        Additional Roles, Industries Served, Total Career Experience
+      Per-record:
+        Credential Status (applied to every ACTIVE/EXPIRING_SOON/EXPIRED
+        credential with an expiry_date), Project Responsibility Bullets
+        (applied to every ProjectRecord whose responsibilities field is
+        currently blank — never overwrites existing candidate text)
 
+    Body:
+      {
+        "professional_id": <id>
+      }
 
+    Scoped fields run once per ScopeCatalog discovered from this
+    professional's own project experience (distinct scopes behind their
+    ProjectScope rows) — a ProfessionalScope row is created for any scope
+    that doesn't already have one. There's no payload option to restrict
+    or seed an arbitrary scope list; it's always everything their projects
+    already touch.
+
+    A failure on one field (e.g. no verified data yet for that scope)
+    does not stop the rest — it comes back as one "ERROR" entry alongside
+    the others' "SAVED" entries, so the response always reflects the full
+    batch outcome, never just the first failure.
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(request=CalculateFixedSystemFieldsRequestSerializer)
+    def post(self, request):
+        professional_id = request.data.get("professional_id")
+
+        if not professional_id:
+            return Response(
+                {"success": False, "message": "'professional_id' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            professional = ProfessionalProfile.objects.get(pk=professional_id)
+        except ProfessionalProfile.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Professional not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Scopes are always auto-discovered from this professional's own
+        # project experience (see calculate_fixed_fields_for_professional) —
+        # nothing in the payload can override that.
+        results = calculate_fixed_fields_for_professional(professional, scopes=None)
+
+        saved = sum(
+            1
+            for bucket in ("scopes", "profile", "credentials", "responsibilities")
+            for r in results[bucket]
+            if r["status"] == "SAVED"
+        )
+        errored = sum(
+            1
+            for bucket in ("scopes", "profile", "credentials", "responsibilities")
+            for r in results[bucket]
+            if r["status"] == "ERROR"
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Fixed-field recalculation complete: {saved} saved, "
+                f"{errored} could not be calculated.",
+                "data": {
+                    "professional": professional.pk,
+                    "fields_covered": sorted(FIXED_FIELD_CODES),
+                    **results,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )      
+        

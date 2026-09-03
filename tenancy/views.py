@@ -18,7 +18,7 @@ from django.utils import timezone
 from django.db import transaction
 from accounts.models import UserTbl, roles
 import uuid
-
+from catalog.models import *
 
 def _request_example(serializer_class):
     example = {}
@@ -148,6 +148,8 @@ class TenantCombinedCreateAPIView(APIView):
         )
             
 
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class TenantListCreateAPIView(APIView):
     """
@@ -176,8 +178,45 @@ class TenantListCreateAPIView(APIView):
         serializer = TenantSerializer(data=request.data)
 
         if serializer.is_valid():
-            serializer.save()
-
+            tenant_rec = serializer.save()
+            
+            invitation_token = request.data.get(
+                "invitation_token"
+            )
+            if not invitation_token:        
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Invitation token is required."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            invite = (TenantRegistrationInvite.objects.filter(invitation_token=invitation_token, is_registered=False).first())
+            if not invite:
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Invalid or already used "
+                            "tenant registration invitation."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            invite.tenant_rec = tenant_rec
+            invite.is_registered = True
+            invite.registered_date_time = timezone.now()
+            invite.save(
+                update_fields=[
+                    "tenant_rec",
+                    "is_registered",
+                    "registered_date_time",
+                    "updated_at",
+                ]
+            )
+            
             return Response(
                 {
                     "success": True,

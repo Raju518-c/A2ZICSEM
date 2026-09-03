@@ -53,6 +53,20 @@ class CalculationRuleSerializer(serializers.ModelSerializer):
 
 
 
+class CalculateFixedSystemFieldsRequestSerializer(serializers.Serializer):
+    """Request body for CalculateFixedSystemFieldsAPIView. Plain
+    serializers.Serializer (not a ModelSerializer) since this isn't a
+    model — it only exists so drf-spectacular can render the payload
+    shape in Swagger; the view still reads request.data directly.
+    """
+
+    professional_id = serializers.IntegerField(
+        help_text="ProfessionalProfile id to recalculate fixed fields for. "
+        "Scoped fields (Calendar Experience, Verified Field Days, Verified "
+        "Project Count, Highest Authority Reached) run for every scope the "
+        "professional already has a ProfessionalScope row for; no scope "
+        "can be seeded through this endpoint."
+    )
 
 
         

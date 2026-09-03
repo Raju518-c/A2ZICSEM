@@ -681,7 +681,7 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
     
     
 
-        
+
 
 
 

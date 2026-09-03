@@ -420,3 +420,74 @@ class FormField(TimeStampedModel):
 
     def __str__(self):
         return f"{self.form_module} — {self.field_code}"
+
+
+
+import uuid
+
+
+class TenantRegistrationInvite(models.Model):
+
+    email = models.EmailField(
+        max_length=254
+    )
+
+    description = models.TextField(
+        null=True,
+        blank=True
+    )
+
+    registered_industry = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True
+    )
+
+    invitation_date_time = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    is_registered = models.BooleanField(
+        default=False
+    )
+
+    registered_date_time = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    invitation_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False
+    )
+
+    # ==================================================
+    # REGISTERED TENANT
+    # ==================================================
+
+    tenant_rec = models.ForeignKey(
+        "tenancy.Tenant",
+        on_delete=models.CASCADE,
+        related_name="tenant_registration_invites",
+        null=True,
+        blank=True
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    class Meta:
+        db_table = "tenant_registration_invite"
+        ordering = ["-invitation_date_time"]
+
+    def __str__(self):
+        return self.email
+    
+    
+

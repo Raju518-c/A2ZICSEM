@@ -41,10 +41,14 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="professional_scopes",
         db_index=True,
+        null=True,
+        blank=True,
         help_text="Industry/scope competency context; global active/retired scope.",
     )
     calendar_experience_months = models.PositiveIntegerField(
         default=0,
+        null=True,
+        blank=True,
         help_text="Non-duplicated calendar experience; union of verified "
         "project date intervals for this scope; never manually edited.",
     )
@@ -52,6 +56,8 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
         max_digits=8,
         decimal_places=2,
         default=0,
+        null=True,
+        blank=True,
         help_text="Verified actual field exposure; derived from approved ExposureLog.",
     )
     complexity_rating = models.ForeignKey(
@@ -66,6 +72,7 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     current_qualion_level = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="professional_scopes_qualion_level",
         help_text="Current L0-L5 level for this scope; option_set must be "
         "QUALION_LEVEL; default L0.",
@@ -73,12 +80,15 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     current_authority_status = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="professional_scopes_authority_status",
         help_text="Current permitted authority for this scope; option_set "
         "must be AUTHORITY_STATUS; default Observer.",
     )
     verified_project_count = models.PositiveIntegerField(
         default=0,
+        null=True,
+        blank=True,
         help_text="Count of distinct VERIFIED ProjectScope rows for "
         "this professional+scope; system-managed, never manually edited."
     )
@@ -163,41 +173,47 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
         help_text="Scope competency being assessed.",
     )
     assessment_type = models.CharField(
-        max_length=30, choices=AssessmentType.choices, help_text="Assessment purpose."
+        max_length=30, null=True, blank=True, choices=AssessmentType.choices, help_text="Assessment purpose."
     )
     assessor = models.ForeignKey(
         "accounts.UserTbl",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="competency_assessments_conducted",
         help_text="Person conducting assessment; authorised same-tenant "
         "reviewer/mentor; cannot be assessed professional.",
     )
     assessor_role_snapshot = models.CharField(
-        max_length=60, help_text="Assessor authority snapshot captured at assessment time."
+        max_length=60, null=True, blank=True, help_text="Assessor authority snapshot captured at assessment time."
     )
     technical_knowledge_score = models.DecimalField(
-        max_digits=5, decimal_places=2, help_text="Technical knowledge dimension (0.00-100.00)."
+        max_digits=5, null=True, blank=True, decimal_places=2, help_text="Technical knowledge dimension (0.00-100.00)."
     )
     field_execution_score = models.DecimalField(
-        max_digits=5, decimal_places=2, help_text="Field execution discipline dimension (0.00-100.00)."
+        max_digits=5, null=True, blank=True, decimal_places=2, help_text="Field execution discipline dimension (0.00-100.00)."
     )
     documentation_evidence_score = models.DecimalField(
         max_digits=5,
+        null=True,
+        blank=True,
         decimal_places=2,
         help_text="Documentation and evidence quality dimension; threshold "
         "may block progression.",
     )
     ethics_independence_score = models.DecimalField(
         max_digits=5,
+        null=True,
+        blank=True,
         decimal_places=2,
         help_text="Ethics and independence dimension; threshold may block progression.",
     )
     communication_conduct_score = models.DecimalField(
-        max_digits=5, decimal_places=2, help_text="Communication and professional conduct dimension."
+        max_digits=5, null=True, blank=True, decimal_places=2, help_text="Communication and professional conduct dimension."
     )
     previous_level = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="competency_assessments_previous_level",
         help_text="Level before assessment; QUALION_LEVEL snapshot.",
     )
@@ -220,6 +236,7 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
     previous_authority = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="competency_assessments_previous_authority",
         help_text="Authority before assessment; AUTHORITY_STATUS snapshot.",
     )
@@ -240,7 +257,7 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
         help_text="Approved authority; required when decision=APPROVED.",
     )
     recommendation = models.TextField(
-        max_length=3000, help_text="Assessor recommendation and observations; evidence-based."
+        max_length=3000, null=True, blank=True, help_text="Assessor recommendation and observations; evidence-based."
     )
     decision = models.CharField(
         max_length=20,
@@ -251,6 +268,7 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
     )
     decision_reason = models.TextField(
         max_length=3000,
+        null=True,
         blank=True,
         help_text="Required for rejection or override.",
     )
@@ -268,6 +286,7 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
     )
     evidence_summary = models.JSONField(
         default=dict,
+        null=True,
         blank=True,
         help_text="Evidence used in assessment; source record IDs and "
         "calculated metrics; immutable after decision.",

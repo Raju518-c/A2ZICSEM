@@ -59,7 +59,21 @@ class CoreEmploymentRecordSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+
+class CoreScopeResponseSerializer(serializers.ModelSerializer):    
+    class Meta:
+        model = ScopeResponse
+        fields = "__all__"
+
+class CoreProjectScopeSerializer(serializers.ModelSerializer):
+    scope_responses = CoreScopeResponseSerializer(many=True, read_only=True)
+    class Meta:
+        model = ProjectScope
+        fields = "__all__"
+
+
 class CoreProjectRecordSerializer(serializers.ModelSerializer):
+    project_scopes = CoreProjectScopeSerializer(many=True, read_only=True)
     class Meta:
         model = ProjectRecord
         fields = "__all__"

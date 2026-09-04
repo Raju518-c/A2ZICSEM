@@ -243,6 +243,13 @@ class ProjectRecordInputSerializer(serializers.Serializer):
         allow_null=True
     )
 
+    verified_field_days = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        required=False,
+        allow_null=True
+    )
+
     responsibilities = serializers.CharField(
         required=False,
         allow_blank=True
@@ -366,6 +373,10 @@ class BulkProjectRecordSerializer(serializers.Serializer):
 
                     declared_field_days=project_payload.get(
                         "declared_field_days"
+                    ),
+
+                    verified_field_days=project_payload.get(
+                        "verified_field_days"
                     ),
 
                     responsibilities=project_payload.get(

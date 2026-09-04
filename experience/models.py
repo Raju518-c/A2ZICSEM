@@ -192,7 +192,7 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="project_records",
+        related_name="employment_project_records",
         help_text="Employment/contract under which project was performed. "
         "Must belong to same professional; dates normally cover project.",
     )
@@ -345,7 +345,7 @@ class ProjectRecord(TenantOwnedModel, TimeStampedModel, UUIDModel):
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name="project_records",
+        related_name="project_records_industry",
         help_text="Related industry; used for classification and reporting.",
     )
 
@@ -401,7 +401,7 @@ class ProjectScope(TenantOwnedModel, TimeStampedModel):
     scope = models.ForeignKey(
         "catalog.ScopeCatalog",
         on_delete=models.PROTECT,
-        related_name="project_scopes",
+        related_name="project_record_scopes",
         db_index=True,
         help_text="Scope performed on project; active scope, registration "
         "industry does not limit later verified scopes.",
@@ -413,7 +413,7 @@ class ProjectScope(TenantOwnedModel, TimeStampedModel):
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
         null=True, blank=True,
-        related_name="project_scopes",
+        related_name="project_record_authority",
         help_text="Observed, assisted, performed, reviewed, approved, etc. "
         "option_set must be AUTHORITY_ACTION.",
     )
@@ -464,7 +464,7 @@ class ScopeResponse(TenantOwnedModel, TimeStampedModel):
     form_field = models.ForeignKey(
         "catalog.FormField",
         on_delete=models.PROTECT,
-        related_name="scope_responses",
+        related_name="scope_responses_fields",
         db_index=True,
         help_text="Question being answered; must belong to an active module "
         "mapped to project_scope.scope.",

@@ -85,4 +85,11 @@ urlpatterns = [
         OverrideCalculatedFieldAPIView.as_view(),
         name="calculated-field-override",
     ),
+        
+    path(
+        "professional/calculated-fields/",
+        ProfessionalCalculatedFieldsAPIView.as_view(),
+        name="professional-calculated-fields",
+    ),
+
 ]

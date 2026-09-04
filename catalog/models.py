@@ -313,13 +313,48 @@ class FormField(TimeStampedModel):
         STRING = "STRING", "String"
         INTEGER = "INTEGER", "Integer"
         DECIMAL = "DECIMAL", "Decimal"
-        DATE = "DATE", "Date"
         BOOLEAN = "BOOLEAN", "Boolean"
+        DATE = "DATE", "Date"
+        DURATION = "DURATION", "Duration"
+        RECORD = "RECORD", "Record"
+
         ENUM = "ENUM", "Enum"
         ENUM_LIST = "ENUM_LIST", "Enum list"
+        ENUM_SCORE = "ENUM_SCORE", "Enum / score"
+        ENUM_DETAILS = "ENUM_DETAILS", "Enum + details"
+
         STRING_LIST = "STRING_LIST", "String list"
+        LOCATION_LIST = "LOCATION_LIST", "Location list"
+
+        NUMBER_RANGE = "NUMBER_RANGE", "Number range"
+        NUMBER_UNIT = "NUMBER_UNIT", "Number + unit"
+        NUMBER_UNITS = "NUMBER_UNITS", "Number + units"
+        NUMBER_TEXT = "NUMBER_TEXT", "Number + text"
+        NUMBER_PAIR_UNITS = "NUMBER_PAIR_UNITS", "Number pair + units"
+
+        INTEGER_TEXT = "INTEGER_TEXT", "Integer + text"
+        INTEGER_PAIR = "INTEGER_PAIR", "Integer pair"
+
+        DECIMAL_UNIT = "DECIMAL_UNIT", "Decimal + unit"
+
+        STRING_NUMBER = "STRING_NUMBER", "String + number"
+
+        BOOLEAN_DETAILS = "BOOLEAN_DETAILS", "Boolean + details"
+        BOOLEAN_NUMBER = "BOOLEAN_NUMBER", "Boolean + number"
+
+        ACTIVITY_LEVEL = "ACTIVITY_LEVEL", "Activity level"
+        ACTIVITY_RECORD = "ACTIVITY_RECORD", "Activity record"
+
+        CREDENTIAL_LINK = "CREDENTIAL_LINK", "Credential link"
+        CREDENTIAL_LINKS = "CREDENTIAL_LINKS", "Credential links"
+        REPEATABLE_CREDENTIAL_LINK = (
+            "REPEATABLE_CREDENTIAL_LINK",
+            "Repeatable credential link",
+        )
+
         RICH_TEXT = "RICH_TEXT", "Rich text"
         FILE = "FILE", "File"
+    
 
     form_module = models.ForeignKey(
         FormModule,

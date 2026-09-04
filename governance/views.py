@@ -1089,12 +1089,18 @@ class CalculateFixedSystemFieldsAPIView(APIView):
             for r in results[bucket]
             if r["status"] == "ERROR"
         )
+        skipped = sum(
+            1
+            for bucket in ("scopes", "profile", "credentials", "responsibilities")
+            for r in results[bucket]
+            if r["status"] == "SKIPPED"
+        )
 
         return Response(
             {
                 "success": True,
                 "message": f"Fixed-field recalculation complete: {saved} saved, "
-                f"{errored} could not be calculated.",
+                f"{errored} could not be calculated, {skipped} skipped.",
                 "data": {
                     "professional": professional.pk,
                     "fields_covered": sorted(FIXED_FIELD_CODES),
@@ -1102,5 +1108,1520 @@ class CalculateFixedSystemFieldsAPIView(APIView):
                 },
             },
             status=status.HTTP_200_OK,
-        )      
+        )
+        
+ 
+
+
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Prefetch
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from drf_spectacular.utils import extend_schema, OpenApiExample
+
+from professionals.models import (
+    ProfessionalProfile,
+    CredentialRecord,
+)
+
+from experience.models import (
+    ProjectRecord,
+    ProjectScope,
+    ScopeResponse,
+)
+
+from competency.models import ProfessionalScope
+
+
+# ============================================================
+# PROJECT VERIFICATION STATUSES REQUESTED BY YOU
+# ============================================================
+
+ALLOWED_PROJECT_VERIFICATION_STATUSES = [
+    "SELF_DECLARED",
+    "EVIDENCE_UPLOADED",
+    "VERIFIED",
+    "REJECTED",
+]
+
+
+# ============================================================
+# AUTHORITY ORDER
+# ============================================================
+#
+# Excel rule:
+#
+# "Highest verified authority level achieved on the standard
+# ladder, from Observed through Technical Authority."
+#
+# IMPORTANT:
+# These values should match catalog.ReferenceValue.code values
+# stored for AUTHORITY_ACTION.
+#
+# Add/remove aliases below according to your actual master data.
+# ============================================================
+
+AUTHORITY_RANK = {
+    "OBSERVED": 1,
+    "OBSERVE": 1,
+
+    "ASSISTED": 2,
+    "ASSIST": 2,
+
+    "PERFORMED": 3,
+    "PERFORM": 3,
+    "EXECUTED": 3,
+
+    "REVIEWED": 4,
+    "REVIEW": 4,
+
+    "APPROVED": 5,
+    "APPROVE": 5,
+
+    "TECHNICAL_AUTHORITY": 6,
+    "TECHNICAL AUTHORITY": 6,
+    "TA": 6,
+}
+
+
+# ============================================================
+# DATE HELPERS
+# ============================================================
+
+def months_between(start_date, end_date):
+    """
+    Calculate calendar month span.
+
+    Example:
+        2024-01-01 -> 2024-02-01 = 1
+        2024-01-15 -> 2025-03-10 = 14
+
+    Requirement says:
+        first project start_date -> last project end_date
+        and current date if end_date is NULL.
+
+    We therefore calculate the difference between year/month
+    components rather than summing individual project periods.
+    """
+
+    if not start_date or not end_date:
+        return 0
+
+    if end_date < start_date:
+        return 0
+
+    return (
+        (end_date.year - start_date.year) * 12
+        + (end_date.month - start_date.month)
+    )
+
+
+def project_duration_days(project, today):
+    """
+    Used to determine the longest project for primary_role.
+    """
+
+    if not project.start_date:
+        return 0
+
+    end_date = project.end_date or today
+
+    if end_date < project.start_date:
+        return 0
+
+    return (end_date - project.start_date).days + 1
+
+
+# ============================================================
+# REFERENCE VALUE HELPERS
+# ============================================================
+
+def reference_value_code(reference):
+    """
+    Safely return ReferenceValue.code.
+
+    Falls back to label/string only when required.
+    """
+
+    if not reference:
+        return None
+
+    code = getattr(reference, "code", None)
+
+    if code:
+        return str(code).strip().upper()
+
+    label = getattr(reference, "label", None)
+
+    if label:
+        return str(label).strip().upper()
+
+    return str(reference).strip().upper()
+
+
+def reference_value_label(reference):
+    """
+    Human-readable ReferenceValue label.
+    """
+
+    if not reference:
+        return ""
+
+    label = getattr(reference, "label", None)
+
+    if label:
+        return str(label).strip()
+
+    value = getattr(reference, "value", None)
+
+    if value:
+        return str(value).strip()
+
+    code = getattr(reference, "code", None)
+
+    if code:
+        return str(code).replace("_", " ").title()
+
+    return str(reference)
+
+
+def reference_json_value(reference):
+    """
+    Value stored inside JSONField fields such as:
+        additional_roles
+        industries_served
+
+    Prefer stable ReferenceValue code.
+
+    Example:
+        ["WELDING_INSPECTOR", "COATING_INSPECTOR"]
+        ["OIL_GAS", "MARINE_OFFSHORE"]
+    """
+
+    if not reference:
+        return None
+
+    code = getattr(reference, "code", None)
+
+    if code:
+        return code
+
+    return reference.pk
+
+
+# ============================================================
+# HIGHEST AUTHORITY
+# ============================================================
+
+def get_highest_authority(project_scope_rows):
+    """
+    Excel rule:
+
+        Highest Authority Reached
+
+        Based on:
+            Authority level recorded per project,
+            verification status.
+
+        How it works:
+            Highest VERIFIED authority achieved on the
+            standard authority ladder.
+
+    IMPORTANT:
+        ProjectRecord may be SELF_DECLARED, etc.,
+        but authority itself must be VERIFIED.
+
+    Therefore only ProjectScope records with:
+        verification_status == VERIFIED
+    are considered here.
+    """
+
+    highest_authority = None
+    highest_rank = 0
+
+    for project_scope in project_scope_rows:
+
+        # Sheet explicitly says VERIFIED authority.
+        if project_scope.verification_status != "VERIFIED":
+            continue
+
+        authority = project_scope.authority_action
+
+        if not authority:
+            continue
+
+        authority_code = reference_value_code(authority)
+
+        if not authority_code:
+            continue
+
+        rank = AUTHORITY_RANK.get(authority_code, 0)
+
+        if rank > highest_rank:
+            highest_rank = rank
+            highest_authority = authority
+
+    return highest_authority
+
+
+# ============================================================
+# RESPONSIBILITY GENERATION
+# ============================================================
+
+def normalise_response_value(value):
+    """
+    Convert ScopeResponse JSONField value into readable text.
+    """
+
+    if value is None:
+        return ""
+
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+
+    if isinstance(value, list):
+        return ", ".join(
+            str(item)
+            for item in value
+            if item not in [None, ""]
+        )
+
+    if isinstance(value, dict):
+        values = []
+
+        for key, item in value.items():
+
+            if item in [None, "", [], {}]:
+                continue
+
+            values.append(
+                f"{str(key).replace('_', ' ').title()}: {item}"
+            )
+
+        return "; ".join(values)
+
+    return str(value).strip()
+
+
+def get_form_field_label(form_field):
+    """
+    Different versions of your model have used field_label / label.
+
+    This supports either without breaking.
+    """
+
+    if not form_field:
+        return ""
+
+    label = getattr(form_field, "field_label", None)
+
+    if label:
+        return label
+
+    label = getattr(form_field, "label", None)
+
+    if label:
+        return label
+
+    field_code = getattr(form_field, "field_code", None)
+
+    if field_code:
+        return field_code.replace("_", " ").replace(".", " ").title()
+
+    return str(form_field)
+
+
+def generate_project_responsibilities(project):
+    """
+    Sheet rule:
+
+        Project Responsibility Bullets
+
+        Based on:
+            Structured activity fields on each project.
+
+        How it works:
+            Draft automatically from structured data
+            instead of unsupported free text.
+
+    Sources used:
+        ProjectScope.activity_summary
+        ScopeResponse.form_field
+        ScopeResponse.value
+
+    No AI-generated/invented activities are added.
+    """
+
+    bullets = []
+    seen = set()
+
+    for project_scope in project.project_scopes.all():
+
+        scope_name = getattr(
+            project_scope.scope,
+            "scope_name",
+            str(project_scope.scope),
+        )
+
+        # ----------------------------------------------------
+        # ProjectScope activity
+        # ----------------------------------------------------
+
+        activity_summary = (
+            project_scope.activity_summary or ""
+        ).strip()
+
+        if activity_summary:
+
+            bullet = (
+                f"{scope_name}: {activity_summary}"
+            )
+
+            if bullet not in seen:
+                bullets.append(bullet)
+                seen.add(bullet)
+
+        # ----------------------------------------------------
+        # ScopeResponse structured values
+        # ----------------------------------------------------
+
+        for response in project_scope.scope_responses.all():
+
+            value = normalise_response_value(response.value)
+
+            if not value:
+                continue
+
+            field_label = get_form_field_label(
+                response.form_field
+            )
+
+            bullet = (
+                f"{scope_name} - "
+                f"{field_label}: {value}"
+            )
+
+            if bullet not in seen:
+                bullets.append(bullet)
+                seen.add(bullet)
+
+    if not bullets:
+        return ""
+
+    return "\n".join(
+        f"• {bullet}"
+        for bullet in bullets
+    )
+
+
+# ============================================================
+# PROFILE HEADLINE
+# ============================================================
+
+def generate_headline(
+    professional_scope_records,
+    primary_role,
+):
+    """
+    Excel:
+
+        Headline is based on:
+            Verified level + industry + scope.
+
+    We choose the strongest available ProfessionalScope record.
+
+    Priority:
+        current_qualion_level
+        authority
+        calendar experience
+
+    If current_qualion_level has not yet been calculated,
+    headline falls back to:
+        Primary Role | Scope | Industry
+
+    This avoids inventing a Qualion level.
+    """
+
+    if not professional_scope_records:
+        if primary_role:
+            return reference_value_label(primary_role)[:140]
+
+        return ""
+
+    def scope_sort_key(record):
+
+        level = getattr(
+            record,
+            "current_qualion_level",
+            None,
+        )
+
+        level_code = reference_value_code(level) or ""
+
+        level_number = 0
+
+        if level_code.startswith("L"):
+            try:
+                level_number = int(
+                    level_code.replace("L", "")
+                )
+            except ValueError:
+                level_number = 0
+
+        authority = getattr(
+            record,
+            "highest_authority_reached",
+            None,
+        )
+
+        authority_rank = AUTHORITY_RANK.get(
+            reference_value_code(authority),
+            0,
+        )
+
+        experience = (
+            record.calendar_experience_months or 0
+        )
+
+        return (
+            level_number,
+            authority_rank,
+            experience,
+        )
+
+    best_scope = max(
+        professional_scope_records,
+        key=scope_sort_key,
+    )
+
+    level = getattr(
+        best_scope,
+        "current_qualion_level",
+        None,
+    )
+
+    scope = getattr(
+        best_scope,
+        "scope",
+        None,
+    )
+
+    industry = (
+        scope.industry
+        if scope and scope.industry_id
+        else None
+    )
+
+    parts = []
+
+    if level:
+        parts.append(reference_value_label(level))
+
+    if primary_role:
+        parts.append(reference_value_label(primary_role))
+
+    if scope:
+        scope_name = getattr(
+            scope,
+            "scope_name",
+            str(scope),
+        )
+
+        parts.append(scope_name)
+
+    if industry:
+        parts.append(
+            reference_value_label(industry)
+        )
+
+    # Remove duplicates while retaining order
+    unique_parts = []
+
+    for part in parts:
+
+        if (
+            part
+            and part.lower()
+            not in [
+                x.lower()
+                for x in unique_parts
+            ]
+        ):
+            unique_parts.append(part)
+
+    headline = " | ".join(unique_parts)
+
+    return headline[:140]
+
+
+# ============================================================
+# PROFILE SUMMARY
+# ============================================================
+
+def generate_summary(
+    profile,
+    professional_scope_records,
+    primary_role,
+    additional_roles,
+    industries,
+    career_months,
+):
+    """
+    Excel:
+
+        Professional Summary
+
+        Based on:
+            Full structured profile.
+
+        How it works:
+            System drafts summary from facts on file.
+            It must not invent unsupported claims.
+
+    Therefore this only uses stored/calculated values.
+    """
+
+    parts = []
+
+    name = (
+        profile.display_name
+        or profile.legal_full_name
+        or ""
+    )
+
+    primary_role_name = (
+        reference_value_label(primary_role)
+        if primary_role
+        else ""
+    )
+
+    # --------------------------------------------------------
+    # Opening
+    # --------------------------------------------------------
+
+    if name and primary_role_name:
+        parts.append(
+            f"{name} is a {primary_role_name} "
+            f"with {career_months} months of recorded "
+            f"project experience."
+        )
+
+    elif primary_role_name:
+        parts.append(
+            f"Professional with primary experience as "
+            f"{primary_role_name} and {career_months} months "
+            f"of recorded project experience."
+        )
+
+    elif career_months:
+        parts.append(
+            f"Professional with {career_months} months "
+            f"of recorded project experience."
+        )
+
+    # --------------------------------------------------------
+    # Industries
+    # --------------------------------------------------------
+
+    industry_names = [
+        reference_value_label(industry)
+        for industry in industries
+        if industry
+    ]
+
+    if industry_names:
+        parts.append(
+            "Industry experience includes "
+            + ", ".join(industry_names)
+            + "."
+        )
+
+    # --------------------------------------------------------
+    # Scopes
+    # --------------------------------------------------------
+
+    scope_names = []
+
+    for professional_scope in professional_scope_records:
+
+        scope = getattr(
+            professional_scope,
+            "scope",
+            None,
+        )
+
+        if not scope:
+            continue
+
+        scope_name = getattr(
+            scope,
+            "scope_name",
+            str(scope),
+        )
+
+        if scope_name not in scope_names:
+            scope_names.append(scope_name)
+
+    if scope_names:
+        parts.append(
+            "Recorded scope experience includes "
+            + ", ".join(scope_names)
+            + "."
+        )
+
+    # --------------------------------------------------------
+    # Highest authority
+    # --------------------------------------------------------
+
+    authorities = []
+
+    for professional_scope in professional_scope_records:
+
+        authority = getattr(
+            professional_scope,
+            "highest_authority_reached",
+            None,
+        )
+
+        if authority:
+            authorities.append(authority)
+
+    if authorities:
+
+        highest = max(
+            authorities,
+            key=lambda authority: AUTHORITY_RANK.get(
+                reference_value_code(authority),
+                0,
+            ),
+        )
+
+        authority_name = reference_value_label(
+            highest
+        )
+
+        if authority_name:
+            parts.append(
+                f"Highest verified authority recorded is "
+                f"{authority_name}."
+            )
+
+    # --------------------------------------------------------
+    # Additional roles
+    # --------------------------------------------------------
+
+    additional_role_names = [
+        reference_value_label(role)
+        for role in additional_roles
+        if role
+    ]
+
+    if additional_role_names:
+        parts.append(
+            "Additional recorded roles include "
+            + ", ".join(additional_role_names)
+            + "."
+        )
+
+    return " ".join(parts)[:2000]
+
+
+# ============================================================
+# CREDENTIAL STATUS
+# ============================================================
+
+def calculate_credential_status(
+    credential,
+    today,
+):
+    """
+    Current model supports:
+
+        DRAFT
+        ACTIVE
+        EXPIRED
+        REVOKED
+        ARCHIVED
+
+    Rules:
+
+    1. REVOKED stays REVOKED.
+    2. ARCHIVED stays ARCHIVED.
+    3. expiry_date before today -> EXPIRED.
+    4. end_date before today -> EXPIRED.
+    5. start_date in future -> DRAFT.
+    6. issue_date in future -> DRAFT.
+    7. Otherwise -> ACTIVE.
+
+    We DO NOT automatically overwrite REVOKED/ARCHIVED.
+    """
+
+    if credential.status in [
+        "REVOKED",
+        "ARCHIVED",
+    ]:
+        return credential.status
+
+    if (
+        credential.expiry_date
+        and credential.expiry_date < today
+    ):
+        return "EXPIRED"
+
+    if (
+        credential.end_date
+        and credential.end_date < today
+    ):
+        return "EXPIRED"
+
+    if (
+        credential.start_date
+        and credential.start_date > today
+    ):
+        return "DRAFT"
+
+    if (
+        credential.issue_date
+        and credential.issue_date > today
+    ):
+        return "DRAFT"
+
+    return "ACTIVE"
+
+
+# ============================================================
+# MAIN API
+# ============================================================
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProfessionalCalculatedFieldsAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "professional_profile_id": {
+                        "type": "string",
+                        "format": "uuid",
+                    },
+                },
+                "required": [
+                    "professional_profile_id"
+                ],
+            }
+        },
+        description=(
+            "Recalculate ProfessionalScope, ProfessionalProfile, "
+            "ProjectRecord responsibilities and CredentialRecord "
+            "status from structured professional experience data."
+        ),
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        # ====================================================
+        # 1. PROFESSIONAL PROFILE ID
+        # ====================================================
+
+        professional_profile_id = request.data.get(
+            "professional_profile_id"
+        )
+
+        if not professional_profile_id:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "professional_profile_id is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            profile = (
+                ProfessionalProfile.objects
+                .select_for_update()
+                .get(
+                    pk=professional_profile_id
+                )
+            )
+
+        except ProfessionalProfile.DoesNotExist:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "ProfessionalProfile not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        today = timezone.localdate()
+
+        # ====================================================
+        # 2. FETCH PROJECTS
+        # ====================================================
+        #
+        # ProjectRecord
+        #     -> ProjectScope
+        #         -> ScopeResponse
+        #
+        # Everything fetched upfront to avoid N+1 queries.
+        # ====================================================
+
+        scope_response_queryset = (
+            ScopeResponse.objects
+            .select_related(
+                "form_field"
+            )
+            .order_by(
+                "repeat_index"
+            )
+        )
+
+        project_scope_queryset = (
+            ProjectScope.objects
+            .select_related(
+                "scope",
+                "scope__industry",
+                "authority_action",
+            )
+            .prefetch_related(
+                Prefetch(
+                    "scope_responses",
+                    queryset=scope_response_queryset,
+                )
+            )
+        )
+
+        projects = list(
+            ProjectRecord.objects
+            .filter(
+                professional=profile,
+                verification_status__in=(
+                    ALLOWED_PROJECT_VERIFICATION_STATUSES
+                ),
+            )
+            .select_related(
+                "role_title",
+                "industry_classification",
+            )
+            .prefetch_related(
+                Prefetch(
+                    "project_scopes",
+                    queryset=project_scope_queryset,
+                )
+            )
+            .order_by(
+                "start_date"
+            )
+        )
+
+        # No project experience
+        if not projects:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "No eligible ProjectRecord records "
+                        "found for this professional."
+                    ),
+                    "professional_profile_id": str(
+                        profile.pk
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # 3. GROUP PROJECTS BY SCOPE
+        # ====================================================
+
+        scope_groups = defaultdict(list)
+
+        for project in projects:
+
+            for project_scope in (
+                project.project_scopes.all()
+            ):
+
+                scope_groups[
+                    project_scope.scope_id
+                ].append(
+                    {
+                        "project": project,
+                        "project_scope": project_scope,
+                    }
+                )
+
+        # ====================================================
+        # 4. CREATE / UPDATE PROFESSIONAL SCOPE
+        # ====================================================
+
+        calculated_professional_scopes = []
+
+        professional_scope_response = []
+
+        for scope_id, rows in scope_groups.items():
+
+            first_project_scope = rows[0][
+                "project_scope"
+            ]
+
+            scope = first_project_scope.scope
+
+            # ScopeCatalog already carries industry
+            industry = scope.industry
+
+            # -----------------------------------------------
+            # Get unique project records
+            # -----------------------------------------------
+
+            unique_projects = {}
+
+            for row in rows:
+
+                project = row["project"]
+
+                unique_projects[
+                    str(project.pk)
+                ] = project
+
+            grouped_projects = list(
+                unique_projects.values()
+            )
+
+            # -----------------------------------------------
+            # A. calendar_experience_months
+            # -----------------------------------------------
+
+            grouped_projects.sort(
+                key=lambda project: project.start_date
+            )
+
+            first_start_date = min(
+                project.start_date
+                for project in grouped_projects
+                if project.start_date
+            )
+
+            last_end_date = max(
+                (
+                    project.end_date
+                    or today
+                )
+                for project in grouped_projects
+            )
+
+            calendar_experience_months = (
+                months_between(
+                    first_start_date,
+                    last_end_date,
+                )
+            )
+
+            # -----------------------------------------------
+            # B. verified_field_days
+            # -----------------------------------------------
+
+            verified_field_days = sum(
+                (
+                    project.verified_field_days
+                    or Decimal("0")
+                )
+                for project in grouped_projects
+            )
+
+            # -----------------------------------------------
+            # C. verified_project_count
+            # -----------------------------------------------
+
+            verified_project_count = len(
+                grouped_projects
+            )
+
+            # -----------------------------------------------
+            # D. highest_authority_reached
+            # -----------------------------------------------
+            #
+            # IMPORTANT:
+            # Only VERIFIED ProjectScope authority values
+            # participate because this is the Excel rule.
+            # -----------------------------------------------
+
+            grouped_project_scopes = [
+                row["project_scope"]
+                for row in rows
+            ]
+
+            highest_authority = (
+                get_highest_authority(
+                    grouped_project_scopes
+                )
+            )
+
+            # -----------------------------------------------
+            # CREATE / UPDATE
+            # -----------------------------------------------
+            #
+            # Assumes your ProfessionalScope has:
+            #
+            # professional
+            # tenant
+            # industry
+            # scope
+            #
+            # and calculated fields named exactly as supplied.
+            # -----------------------------------------------
+
+            professional_scope, created = (
+                ProfessionalScope.objects
+                .update_or_create(
+                    professional=profile,
+                    scope=scope,
+                    defaults={
+                        "tenant": profile.tenant,
+                        "calendar_experience_months":
+                            calendar_experience_months,
+                        "verified_field_days":
+                            verified_field_days,
+                        "verified_project_count":
+                            verified_project_count,
+                        "highest_authority_reached":
+                            highest_authority,
+                        "last_recalculated_at":
+                            timezone.now(),
+                    },
+                )
+            )
+
+            calculated_professional_scopes.append(
+                professional_scope
+            )
+
+            professional_scope_response.append(
+                {
+                    "id": str(professional_scope.pk),
+                    "created": created,
+
+                    # ProfessionalScope does not contain industry directly.
+                    # Industry comes from ScopeCatalog.
+                    "industry_id": (
+                        scope.industry_id
+                        if scope.industry_id
+                        else None
+                    ),
+                    "industry": (
+                        reference_value_label(scope.industry)
+                        if scope.industry_id
+                        else None
+                    ),
+
+                    "scope_id": scope.pk,
+                    "scope": getattr(
+                        scope,
+                        "scope_name",
+                        str(scope),
+                    ),
+
+                    "calendar_experience_months":
+                        calendar_experience_months,
+
+                    "verified_field_days":
+                        float(verified_field_days),
+
+                    "verified_project_count":
+                        verified_project_count,
+
+                    "highest_authority_reached": (
+                        reference_value_label(
+                            highest_authority
+                        )
+                        if highest_authority
+                        else None
+                    ),
+                }
+            )
+
+        # ====================================================
+        # 5. CALCULATE TOTAL CAREER EXPERIENCE
+        # ====================================================
+        #
+        # Your latest requirement:
+        #
+        # first project start_date
+        #        ->
+        # last project end_date/current date
+        #
+        # across ALL scopes.
+        # ====================================================
+
+        all_start_dates = [
+            project.start_date
+            for project in projects
+            if project.start_date
+        ]
+
+        all_end_dates = [
+            project.end_date or today
+            for project in projects
+        ]
+
+        career_experience_months = 0
+
+        if all_start_dates and all_end_dates:
+
+            career_experience_months = (
+                months_between(
+                    min(all_start_dates),
+                    max(all_end_dates),
+                )
+            )
+
+        # ====================================================
+        # 6. PRIMARY ROLE
+        # ====================================================
+        #
+        # Your rule:
+        #
+        # role_title belonging to project record having
+        # maximum experience duration.
+        # ====================================================
+
+        projects_with_role = [
+            project
+            for project in projects
+            if project.role_title_id
+        ]
+
+        primary_role = None
+
+        if projects_with_role:
+
+            longest_project = max(
+                projects_with_role,
+                key=lambda project:
+                    project_duration_days(
+                        project,
+                        today,
+                    ),
+            )
+
+            primary_role = (
+                longest_project.role_title
+            )
+
+        # ====================================================
+        # 7. ADDITIONAL ROLES
+        # ====================================================
+
+        additional_role_objects = []
+
+        seen_role_ids = set()
+
+        for project in projects:
+
+            role = project.role_title
+
+            if not role:
+                continue
+
+            if (
+                primary_role
+                and role.pk == primary_role.pk
+            ):
+                continue
+
+            if role.pk in seen_role_ids:
+                continue
+
+            seen_role_ids.add(role.pk)
+
+            additional_role_objects.append(
+                role
+            )
+
+        additional_roles_json = [
+            reference_json_value(role)
+            for role in additional_role_objects
+        ]
+
+        # ====================================================
+        # 8. INDUSTRIES SERVED
+        # ====================================================
+
+        industry_objects = []
+
+        seen_industry_ids = set()
+
+        for project in projects:
+
+            industry = (
+                project.industry_classification
+            )
+
+            if not industry:
+                continue
+
+            if industry.pk in seen_industry_ids:
+                continue
+
+            seen_industry_ids.add(
+                industry.pk
+            )
+
+            industry_objects.append(
+                industry
+            )
+
+        industries_served_json = [
+            reference_json_value(industry)
+            for industry in industry_objects
+        ]
+
+        # ====================================================
+        # 9. HEADLINE
+        # ====================================================
+
+        headline = generate_headline(
+            calculated_professional_scopes,
+            primary_role,
+        )
+
+        # ====================================================
+        # 10. SUMMARY
+        # ====================================================
+
+        summary = generate_summary(
+            profile=profile,
+            professional_scope_records=(
+                calculated_professional_scopes
+            ),
+            primary_role=primary_role,
+            additional_roles=(
+                additional_role_objects
+            ),
+            industries=industry_objects,
+            career_months=(
+                career_experience_months
+            ),
+        )
+
+        # ====================================================
+        # 11. UPDATE PROFESSIONAL PROFILE
+        # ====================================================
+
+        profile.headline = headline
+        profile.summary = summary
+
+        profile.summary_source = (
+            ProfessionalProfile
+            .SummarySource
+            .SYSTEM_GENERATED
+        )
+
+        profile.primary_role = primary_role
+
+        profile.additional_roles = (
+            additional_roles_json
+        )
+
+        profile.industries_served = (
+            industries_served_json
+        )
+
+        # Your actual model field from previous implementation
+        # is total_career_experience_months.
+        profile.total_career_experience_months = (
+            career_experience_months
+        )
+
+        profile.save(
+            update_fields=[
+                "headline",
+                "summary",
+                "summary_source",
+                "primary_role",
+                "additional_roles",
+                "industries_served",
+                "total_career_experience_months",
+                "updated_at",
+            ]
+        )
+
+        # ====================================================
+        # 12. UPDATE PROJECT RESPONSIBILITIES
+        # ====================================================
+
+        updated_projects = []
+
+        for project in projects:
+
+            generated_responsibilities = (
+                generate_project_responsibilities(
+                    project
+                )
+            )
+
+            # Do not destroy existing content when
+            # structured data contains nothing.
+            if generated_responsibilities:
+
+                project.responsibilities = (
+                    generated_responsibilities
+                )
+
+                project.save(
+                    update_fields=[
+                        "responsibilities",
+                        "updated_at",
+                    ]
+                )
+
+                updated_projects.append(
+                    {
+                        "project_id": str(
+                            project.pk
+                        ),
+                        "project_name":
+                            project.project_name,
+                        "responsibilities":
+                            generated_responsibilities,
+                    }
+                )
+
+        # ====================================================
+        # 13. UPDATE CREDENTIAL STATUS
+        # ====================================================
+
+        credentials = (
+            CredentialRecord.objects
+            .select_for_update()
+            .filter(
+                professional=profile
+            )
+        )
+
+        updated_credentials = []
+
+        for credential in credentials:
+
+            old_status = credential.status
+
+            new_status = (
+                calculate_credential_status(
+                    credential,
+                    today,
+                )
+            )
+
+            if old_status != new_status:
+
+                credential.status = new_status
+
+                credential.save(
+                    update_fields=[
+                        "status",
+                        "updated_at",
+                    ]
+                )
+
+            updated_credentials.append(
+                {
+                    "credential_id": str(
+                        credential.pk
+                    ),
+                    "title": credential.title,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "issue_date": (
+                        credential.issue_date
+                        if credential.issue_date
+                        else None
+                    ),
+                    "start_date": (
+                        credential.start_date
+                        if credential.start_date
+                        else None
+                    ),
+                    "end_date": (
+                        credential.end_date
+                        if credential.end_date
+                        else None
+                    ),
+                    "expiry_date": (
+                        credential.expiry_date
+                        if credential.expiry_date
+                        else None
+                    ),
+                }
+            )
+
+        # ====================================================
+        # 14. SUCCESS RESPONSE
+        # ====================================================
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Professional calculated fields "
+                    "updated successfully."
+                ),
+                "data": {
+                    "professional_profile": {
+                        "id": str(profile.pk),
+                        "headline":
+                            profile.headline,
+                        "summary":
+                            profile.summary,
+                        "summary_source":
+                            profile.summary_source,
+                        "primary_role": (
+                            reference_value_label(
+                                primary_role
+                            )
+                            if primary_role
+                            else None
+                        ),
+                        "additional_roles":
+                            additional_roles_json,
+                        "industries_served":
+                            industries_served_json,
+                        "total_career_experience_months":
+                            career_experience_months,
+                    },
+
+                    "professional_scopes":
+                        professional_scope_response,
+
+                    "updated_projects":
+                        updated_projects,
+
+                    "credentials":
+                        updated_credentials,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+                
         

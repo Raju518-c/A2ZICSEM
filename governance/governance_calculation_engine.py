@@ -30,7 +30,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.contenttypes.models import ContentType
-from django.db import models
+from django.db import IntegrityError, models
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -420,7 +420,7 @@ def compute_credential_status(credential, today=None):
 # ---------------------------------------------------------------------
 
 def _rank_of_code(option_set_code, code):
-    rv = ReferenceValue.objects.filter(option_set__code=option_set_code, code=code).first()
+    rv = ReferenceValue.objects.filter(option_set__option_type=option_set_code, code=code).first()
     if not rv:
         raise CalculationError(f"No ReferenceValue with option_set={option_set_code}, code={code}")
     return rv.sort_order
@@ -506,20 +506,47 @@ def render_template(template, tokens):
 # ---------------------------------------------------------------------
 
 def _get_or_create_prof_scope(professional, scope, tenant):
+    """Get-or-create the ProfessionalScope row for professional+scope.
+    current_qualion_level/current_authority_status/scope are all nullable
+    on the model now, so new rows are created without inventing a default
+    level or authority — nothing here needs to guess at catalog seed data
+    anymore. Fields that actually depend on a qualion level being present
+    (currently just Headline) are skipped via CalculationSkipped instead,
+    see _has_any_qualion_level below."""
     prof_scope, _ = ProfessionalScope.objects.get_or_create(
         professional=professional,
         scope=scope,
-        defaults={
-            "tenant": tenant,
-            "current_qualion_level": ReferenceValue.objects.filter(
-                option_set__code="QUALION_LEVEL", code="L0"
-            ).first(),
-            "current_authority_status": ReferenceValue.objects.filter(
-                option_set__code="AUTHORITY_STATUS", code="OBSERVER"
-            ).first(),
-        },
+        defaults={"tenant": tenant},
     )
     return prof_scope
+
+
+class CalculationSkipped(Exception):
+    """Raised by a fixed-field handler to say "nothing to compute yet,
+    this isn't an error" — e.g. no qualion level (current or previous)
+    recorded anywhere for this professional. _run_one_fixed_field turns
+    this into status=SKIPPED, distinct from status=ERROR."""
+
+
+def _has_any_qualion_level(professional):
+    """True if this professional has a qualion level recorded anywhere:
+    either "current" (ProfessionalScope.current_qualion_level, any scope)
+    or "previous" (a CompetencyAssessment — previous_level, recommended_level
+    or approved_level — for any of their scopes). Used to gate fields whose
+    Based On column explicitly lists level as an input (currently just
+    Headline) so they're skipped rather than computed with a missing level
+    silently dropped from the output."""
+    if ProfessionalScope.objects.filter(
+        professional=professional, current_qualion_level__isnull=False
+    ).exists():
+        return True
+    return CompetencyAssessment.objects.filter(
+        professional_scope__professional=professional
+    ).filter(
+        models.Q(previous_level__isnull=False)
+        | models.Q(recommended_level__isnull=False)
+        | models.Q(approved_level__isnull=False)
+    ).exists()
 
 
 def build_scope_context(professional, scope, tenant):
@@ -695,6 +722,14 @@ def _handle_rule_based_profile_field(professional, calculation_field_code, field
 
 
 def handle_headline(professional, scope, tenant):
+    if not _has_any_qualion_level(professional):
+        raise CalculationSkipped(
+            "No qualion level recorded yet (current ProfessionalScope."
+            "current_qualion_level, or a previous_level/recommended_level/"
+            "approved_level on any CompetencyAssessment) — Headline's Based "
+            "On column requires level, so it's skipped rather than computed "
+            "with that part silently missing."
+        )
     value = build_headline(professional)
     return {
         "target_instance": professional,
@@ -955,6 +990,13 @@ def _run_one_fixed_field(professional, scope, tenant, calculation_field_code):
             "new_value": result["new_value_raw"],
             "rule_applied": result["rule_label"],
             "history_id": history.pk,
+        }
+    except CalculationSkipped as exc:
+        return {
+            "calculation_field_code": calculation_field_code,
+            "status": "SKIPPED",
+            "scope": scope.pk if scope else None,
+            "message": str(exc),
         }
     except CalculationError as exc:
         return {

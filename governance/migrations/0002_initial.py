@@ -14,6 +14,7 @@ class Migration(migrations.Migration):
         ('contenttypes', '0002_remove_content_type_name'),
         ('evidence', '0002_initial'),
         ('governance', '0001_initial'),
+        ('governance', '0001_5_fix_schema_drift'),
         ('professionals', '0002_initial'),
         ('tenancy', '0001_initial'),
     ]

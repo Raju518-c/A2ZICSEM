@@ -4878,6 +4878,83 @@ class DataExportRequestRetrieveUpdateDeleteAPIView(APIView):
 # ---------------------------------------------------------------------
 
 @method_decorator(csrf_exempt, name='dispatch')
+class ProjectCreateWithMembershipsAPIView(APIView):
+    """
+    POST : Create one new Project, then bulk-create its initial
+    ProjectMembership rows in the same request — mirrors
+    TenantCombinedCreateAPIView's "parent + children in one call"
+    shape, scoped to Project + ProjectMembership.
+
+    The project is validated and created first; if that fails (missing
+    required field, duplicate project_code for the tenant, etc.) the
+    whole request fails with nothing created — no memberships are even
+    attempted. Once the project exists, each membership item is
+    created individually; a duplicate `user` appearing twice in the
+    same request is skipped (not a hard failure) and reported back,
+    same philosophy as ProjectMembershipListCreateAPIView's duplicate
+    handling. `memberships` is optional — omitting it (or sending [])
+    just creates the project on its own.
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(request=ProjectCreateWithMembershipsSerializer)
+    def post(self, request):
+        serializer = ProjectCreateWithMembershipsSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        validated = serializer.validated_data
+        assigned_by = validated["assigned_by"]
+        items = validated.get("memberships") or []
+
+        created = []
+        skipped = []
+
+        with transaction.atomic():
+            project = Project.objects.create(**validated["project"])
+
+            seen_users = set()
+            for item in items:
+                user = item["user"]
+
+                if user.id in seen_users:
+                    skipped.append({"user": user.id, "reason": "Duplicate user in this request."})
+                    continue
+                seen_users.add(user.id)
+
+                membership = ProjectMembership.objects.create(
+                    project=project,
+                    user=user,
+                    role=item["role"],
+                    scopes=item.get("scopes") or [],
+                    effective_from=item.get("effective_from"),
+                    effective_to=item.get("effective_to"),
+                    entitlement=item.get("entitlement") or {},
+                    assigned_by=assigned_by,
+                )
+                created.append(membership)
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Project created with {len(created)} membership(s), {len(skipped)} skipped.",
+                "data": {
+                    "project": ProjectSerializer(project).data,
+                    "memberships": {
+                        "created": ProjectMembershipSerializer(created, many=True).data,
+                        "skipped": skipped,
+                    },
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class ProjectListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -4978,6 +5055,158 @@ class ProjectRetrieveUpdateDeleteAPIView(APIView):
 
         return Response(
             {"success": True, "message": "Project deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+
+# ---------------------------------------------------------------------
+# ProjectMembership — no tenant field of its own (reached via project).
+# POST is bulk-only: {tenant, assigned_by, memberships: [...]}. A
+# duplicate (project, user) pair or a project from the wrong tenant is
+# skipped and reported back, not a hard failure for the whole batch.
+# ---------------------------------------------------------------------
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ProjectMembershipListCreateAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        memberships = ProjectMembership.objects.all().order_by("project", "user")
+        serializer = ProjectMembershipSerializer(memberships, many=True)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Project memberships fetched successfully.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(request=ProjectMembershipBulkCreateSerializer)
+    def post(self, request):
+        serializer = ProjectMembershipBulkCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant = serializer.validated_data["tenant"]
+        assigned_by = serializer.validated_data["assigned_by"]
+        items = serializer.validated_data["memberships"]
+
+        created = []
+        skipped = []
+
+        with transaction.atomic():
+            for item in items:
+                project = item["project"]
+                user = item["user"]
+
+                if project.tenant_id != tenant.id:
+                    skipped.append({
+                        "project": project.id,
+                        "user": user.id,
+                        "reason": "Project does not belong to this tenant.",
+                    })
+                    continue
+
+                if ProjectMembership.objects.filter(project=project, user=user).exists():
+                    skipped.append({
+                        "project": project.id,
+                        "user": user.id,
+                        "reason": "Membership already exists for this project and user.",
+                    })
+                    continue
+
+                membership = ProjectMembership.objects.create(
+                    project=project,
+                    user=user,
+                    role=item["role"],
+                    scopes=item.get("scopes") or [],
+                    effective_from=item.get("effective_from"),
+                    effective_to=item.get("effective_to"),
+                    entitlement=item.get("entitlement") or {},
+                    assigned_by=assigned_by,
+                )
+                created.append(membership)
+
+        return Response(
+            {
+                "success": True,
+                "message": f"{len(created)} membership(s) created, {len(skipped)} skipped.",
+                "data": {
+                    "created": ProjectMembershipSerializer(created, many=True).data,
+                    "skipped": skipped,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ProjectMembershipRetrieveUpdateDeleteAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+        try:
+            return ProjectMembership.objects.get(pk=pk)
+        except ProjectMembership.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        membership = self.get_object(pk)
+
+        if not membership:
+            return Response(
+                {"success": False, "message": "Project membership not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProjectMembershipSerializer(membership)
+
+        return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
+
+    @extend_schema(request=ProjectMembershipSerializer)
+    def put(self, request, pk):
+        membership = self.get_object(pk)
+
+        if not membership:
+            return Response(
+                {"success": False, "message": "Project membership not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProjectMembershipSerializer(membership, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Project membership updated successfully.",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        membership = self.get_object(pk)
+
+        if not membership:
+            return Response(
+                {"success": False, "message": "Project membership not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        membership.delete()
+
+        return Response(
+            {"success": True, "message": "Project membership deleted successfully."},
             status=status.HTTP_200_OK,
         )
 

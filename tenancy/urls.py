@@ -173,8 +173,12 @@ urlpatterns = [
     path("data-export-requests/", DataExportRequestListCreateAPIView.as_view(), name="data-export-request-list-create"),
     path("data-export-requests/<int:pk>/", DataExportRequestRetrieveUpdateDeleteAPIView.as_view(), name="data-export-request-detail"),
     
+    path("projects/create-with-memberships/", ProjectCreateWithMembershipsAPIView.as_view(), name="project-create-with-memberships"),
     path("projects/", ProjectListCreateAPIView.as_view(), name="project-list-create"),
     path("projects/<int:pk>/", ProjectRetrieveUpdateDeleteAPIView.as_view(), name="project-detail"),
+
+    path("project-memberships/", ProjectMembershipListCreateAPIView.as_view(), name="project-membership-list-create"),
+    path("project-memberships/<int:pk>/", ProjectMembershipRetrieveUpdateDeleteAPIView.as_view(), name="project-membership-detail"),
 
     path("project-requirements/", ProjectRequirementListCreateAPIView.as_view(), name="project-requirement-list-create"),
     path("project-requirements/<int:pk>/", ProjectRequirementRetrieveUpdateDeleteAPIView.as_view(), name="project-requirement-detail"),

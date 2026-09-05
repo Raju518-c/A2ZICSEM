@@ -88,13 +88,34 @@ def fix_drift(apps, schema_editor):
     def add_field_if_missing(model, field_name):
         """
         Add a model field only when its database column is missing.
+
+        JSONField is special-cased to a raw ADD COLUMN: Django's SQLite
+        backend adds a field by rebuilding the whole table
+        (_remake_table), and for a JSONField that rebuild's row-copy step
+        fails its own `JSON_VALID(col) OR col IS NULL` CHECK constraint
+        (observed directly — not a hypothetical) because the copied rows
+        don't get valid JSON for the brand-new column. A plain ADD COLUMN
+        sidesteps the rebuild entirely; existing rows get NULL, which is
+        valid here since every JSONField this migration adds is
+        null=True, and the Python-side `default=list`/`default=dict`
+        still applies to every new row going forward regardless of
+        whether the DB column itself carries a default.
         """
         table_name = model._meta.db_table
         actual_columns = get_columns(table_name)
 
         field = model._meta.get_field(field_name)
 
-        if field.column not in actual_columns:
+        if field.column in actual_columns:
+            return
+
+        if field.get_internal_type() == "JSONField":
+            column_type = "JSON" if connection.vendor == "mysql" else "text"
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {field.column} {column_type} NULL"
+                )
+        else:
             schema_editor.add_field(model, field)
 
     # ------------------------------------------------------------------

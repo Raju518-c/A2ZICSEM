@@ -1449,11 +1449,11 @@ class Project(TenantOwnedModel, TimeStampedModel, UUIDModel):
         RESTRICTED = "RESTRICTED", "Restricted"
 
     business_unit = models.ForeignKey(
-        Organization, on_delete=models.SET_NULL, null=True, blank=True, related_name="projects",
+        Organization, on_delete=models.SET_NULL, null=True, blank=True, related_name="projects_business_units",
         help_text="Must be an Organization row with organization_type in BRANCH/DEPARTMENT/OPERATING_UNIT — enforce in clean().",
     )  # Which internal division owns this project, if any.
 
-    location = models.ForeignKey(TenantLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name="projects")
+    location = models.ForeignKey(TenantLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name="projects_locations")
     # Which of the tenant's locations this project is based out of, if any.
 
     project_code = models.CharField(max_length=50)
@@ -1464,8 +1464,8 @@ class Project(TenantOwnedModel, TimeStampedModel, UUIDModel):
     client_organization = models.ForeignKey(Organization, on_delete=models.PROTECT, null=True, blank=True, related_name="client_projects")
     # Which external client this project is for, if any.
 
-    industry = models.ForeignKey("catalog.ReferenceValue", on_delete=models.PROTECT, null=True, blank=True, related_name="projects")
-    scope_catalog_entries = models.ManyToManyField("catalog.ScopeCatalog", blank=True, related_name="projects")
+    industry = models.ForeignKey("catalog.ReferenceValue", on_delete=models.PROTECT, null=True, blank=True, related_name="projects_industry")
+    scope_catalog_entries = models.ManyToManyField("catalog.ScopeCatalog", blank=True, related_name="projects_scopes")
     # What industry/scopes this project covers.
 
     country_code = models.CharField(max_length=2, validators=[validate_iso_country_code])

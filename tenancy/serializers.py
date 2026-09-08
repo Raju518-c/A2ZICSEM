@@ -479,18 +479,20 @@ class TenantReviewDecisionSerializer(serializers.Serializer):
         return data
 
 
-class rolesserializers(serializers.Serializer):
+class rolesserializers(serializers.ModelSerializer):
     class Meta:
         model = roles
         fields = "__all__"
-        read_only_fields = ["created_at"]
+    read_only_fields = ["created"]
 
 
-class UserTblserializers(serializers.Serializer):
+class UserTblserializers(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
     class Meta:
         model = UserTbl
         fields = "__all__"
-        read_only_fields = ["created_at"]        
+    read_only_fields = ["date_joined", "updated_at"]
 
 class Stage1TenantDetailsSerializer(serializers.Serializer):
     """Read-only bundle of everything submitted for a tenant's Stage 1

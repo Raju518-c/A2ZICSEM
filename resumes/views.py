@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 # Create your views here.
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -9,6 +9,11 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import *
 from .serializers import *
+
+from rest_framework.permissions import IsAuthenticated
+from professionals.models import *
+from .services import *
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ResumeTemplateListCreateAPIView(APIView):
@@ -313,6 +318,240 @@ class ResumeGenerationRetrieveUpdateDeleteAPIView(APIView):
             {
                 "success": True,
                 "message": "Resume generation deleted successfully.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class ResumeBuilderAPIView(APIView):
+    """
+    GET Resume Builder API.
+
+    professional_profile_id is the integer
+    primary key of ProfessionalProfile.
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Build Resume",
+        description=(
+            "Build a dynamic resume using the "
+            "ProfessionalProfile integer primary key."
+        ),
+        parameters=[
+
+            OpenApiParameter(
+                name="client_organization_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Client organization ID."
+                ),
+            ),
+
+            OpenApiParameter(
+                name="template_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "ResumeTemplate primary key."
+                ),
+            ),
+
+            OpenApiParameter(
+                name="scope_ids",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Comma-separated ScopeCatalog IDs. "
+                    "Example: 1,2,3"
+                ),
+            ),
+        ],
+
+        responses={
+            200: ResumeBuilderSerializer
+        },
+    )
+    def get(
+        self,
+        request,
+        professional_profile_id,
+    ):
+
+        # =====================================================
+        # PROFESSIONAL PROFILE
+        # =====================================================
+
+        try:
+
+            professional = (
+                ProfessionalProfile.objects
+                .select_related(
+                    "user",
+                    "primary_role",
+                    "primary_industry",
+                    "primary_scope",
+                    "profile_photo_evidence",
+                )
+                .get(
+                    id=professional_profile_id
+                )
+            )
+
+        except ProfessionalProfile.DoesNotExist:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Professional profile "
+                        "not found."
+                    ),
+                    "data": None,
+                },
+                status=(
+                    status.HTTP_404_NOT_FOUND
+                ),
+            )
+
+        # =====================================================
+        # TENANT SECURITY
+        # =====================================================
+
+        request_tenant_id = getattr(
+            request.user,
+            "tenant_id",
+            None,
+        )
+
+        professional_tenant_id = getattr(
+            professional,
+            "tenant_id",
+            None,
+        )
+
+        if (
+            request_tenant_id is not None
+            and professional_tenant_id is not None
+            and str(request_tenant_id)
+            != str(professional_tenant_id)
+        ):
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "You do not have access "
+                        "to this professional profile."
+                    ),
+                    "data": None,
+                },
+                status=(
+                    status.HTTP_403_FORBIDDEN
+                ),
+            )
+
+        # =====================================================
+        # QUERY PARAMETERS
+        # =====================================================
+
+        client_organization_id = (
+            request.query_params.get(
+                "client_organization_id"
+            )
+        )
+
+        template_id = (
+            request.query_params.get(
+                "template_id"
+            )
+        )
+
+        scope_ids_param = (
+            request.query_params.get(
+                "scope_ids"
+            )
+        )
+
+        # =====================================================
+        # SCOPE IDS
+        # =====================================================
+
+        scope_ids = []
+
+        if scope_ids_param:
+
+            scope_ids = [
+                value.strip()
+                for value
+                in scope_ids_param.split(",")
+                if value.strip()
+            ]
+
+        # =====================================================
+        # BUILD
+        # =====================================================
+
+        service = ResumeBuilderService(
+            professional=professional,
+            request=request,
+            client_organization_id=(
+                client_organization_id
+            ),
+            template_id=template_id,
+            scope_ids=scope_ids,
+        )
+
+        try:
+
+            data = service.build()
+
+        except Exception as exc:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Unable to build resume."
+                    ),
+                    "error": str(exc),
+                },
+                status=(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR
+                ),
+            )
+
+        # =====================================================
+        # SERIALIZER
+        # =====================================================
+
+        serializer = ResumeBuilderSerializer(
+            data=data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        # =====================================================
+        # RESPONSE
+        # =====================================================
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Resume built successfully."
+                ),
+                "data": (
+                    serializer.validated_data
+                ),
             },
             status=status.HTTP_200_OK,
         )

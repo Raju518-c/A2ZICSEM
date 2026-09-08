@@ -28,4 +28,11 @@ urlpatterns = [
         ResumeGenerationRetrieveUpdateDeleteAPIView.as_view(),
         name="resume-generation-detail",
     ),
+    path(
+        "resume-builder/<int:professional_profile_id>/",
+        ResumeBuilderAPIView.as_view(),
+        name="resume-builder",
+    ),
+    
+
 ]

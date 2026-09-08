@@ -9,6 +9,7 @@ from catalog.models import ReferenceValue
 
 from .models import *
 from django.http import QueryDict
+from accounts.models import *
 
 class TenantSerializer(serializers.ModelSerializer):
     logo = serializers.ImageField(required=False, allow_null=True, style={"base_template": "file.html"})
@@ -478,6 +479,19 @@ class TenantReviewDecisionSerializer(serializers.Serializer):
         return data
 
 
+class rolesserializers(serializers.Serializer):
+    class Meta:
+        model = roles
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
+class UserTblserializers(serializers.Serializer):
+    class Meta:
+        model = UserTbl
+        fields = "__all__"
+        read_only_fields = ["created_at"]        
+
 class Stage1TenantDetailsSerializer(serializers.Serializer):
     """Read-only bundle of everything submitted for a tenant's Stage 1
     application — the Tenant row itself plus every related table from
@@ -496,6 +510,8 @@ class Stage1TenantDetailsSerializer(serializers.Serializer):
     documents = serializers.SerializerMethodField()
     legal_acceptances = serializers.SerializerMethodField()
     operations = serializers.SerializerMethodField()
+    roles = serializers.SerializerMethodField()
+    users = serializers.SerializerMethodField()
 
     def get_tenant(self, obj):
         return TenantSerializer(obj).data
@@ -547,6 +563,17 @@ class Stage1TenantDetailsSerializer(serializers.Serializer):
             TenantOperation.objects.filter(tenant=obj).order_by("-created_at"), many=True
         ).data
 
+
+
+    def get_roles(self, obj):
+        return rolesserializers(
+            roles.objects.filter(tenant=obj).order_by("-created"), many=True
+        ).data
+
+    def get_users(self, obj):
+        return UserTblserializers(
+            UserTbl.objects.filter(tenant=obj, role__isnull=False, role__tenant=obj).order_by("-updated_at"), many=True
+        ).data
 
 class TenantDocumentSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
@@ -783,8 +810,77 @@ class ProjectScopeLinkSerializer(serializers.ModelSerializer):
 
         
 
+class ProjectMembershipSerializer(serializers.ModelSerializer):
+    """Plain single-record shape — used for GET/PUT responses and for
+    the items inside a bulk-create payload (see
+    ProjectMembershipBulkCreateSerializer). `project` is required per
+    item since one tenant can have several projects; there is no
+    tenant field on this model at all (it's a "via parent" table, same
+    as ProjectRequirementScope/TenantWorkflowStep) — tenant ownership is
+    checked in the view by comparing project.tenant against the
+    tenant given at the top of the bulk payload, not stored here.
+    """
+
+    class Meta:
+        model = ProjectMembership
+        fields = "__all__"
 
 
+class ProjectMembershipItemSerializer(serializers.Serializer):
+    """One membership inside a bulk-create request body. `assigned_by`
+    is intentionally not here — it's given once at the top level of
+    ProjectMembershipBulkCreateSerializer and applied to every item,
+    since the model requires exactly one granter per batch action.
+    """
+
+    project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all())
+    user = serializers.PrimaryKeyRelatedField(queryset=UserTbl.objects.all())
+    role = serializers.PrimaryKeyRelatedField(queryset=roles.objects.all())
+    scopes = serializers.JSONField(required=False, default=list)
+    effective_from = serializers.DateField(required=False, allow_null=True, default=None)
+    effective_to = serializers.DateField(required=False, allow_null=True, default=None)
+    entitlement = serializers.JSONField(required=False, default=dict)
+
+
+class ProjectMembershipBulkCreateSerializer(serializers.Serializer):
+    """POST body for ProjectMembershipListCreateAPIView. `tenant` is
+    used only to validate every item's `project` actually belongs to
+    it (rejected into `skipped`, not a hard failure, if it doesn't) —
+    it is never stored, since ProjectMembership has no tenant field.
+    """
+
+    tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all())
+    assigned_by = serializers.PrimaryKeyRelatedField(queryset=UserTbl.objects.all())
+    memberships = ProjectMembershipItemSerializer(many=True)
+
+
+class ProjectTeamMemberItemSerializer(serializers.Serializer):
+    """One membership inside ProjectCreateWithMembershipsSerializer.
+    Same fields as ProjectMembershipItemSerializer minus `project` —
+    the project doesn't exist yet at validation time, it's created
+    earlier in the same request and applied to every item afterward.
+    """
+
+    user = serializers.PrimaryKeyRelatedField(queryset=UserTbl.objects.all())
+    role = serializers.PrimaryKeyRelatedField(queryset=roles.objects.all())
+    scopes = serializers.JSONField(required=False, default=list)
+    effective_from = serializers.DateField(required=False, allow_null=True, default=None)
+    effective_to = serializers.DateField(required=False, allow_null=True, default=None)
+    entitlement = serializers.JSONField(required=False, default=dict)
+
+
+class ProjectCreateWithMembershipsSerializer(serializers.Serializer):
+    """POST body for ProjectCreateWithMembershipsAPIView. `project` is
+    validated as a nested ProjectSerializer (so all of Project's own
+    required-field and uniqueness rules — e.g. uniq_project_code_per_tenant
+    — apply here too), but is created manually in the view rather than
+    via this serializer's own .save(), since the membership rows need
+    the new project's id afterward.
+    """
+
+    project = ProjectSerializer()
+    assigned_by = serializers.PrimaryKeyRelatedField(queryset=UserTbl.objects.all())
+    memberships = ProjectTeamMemberItemSerializer(many=True, required=False, default=list)
 
 
 

@@ -197,6 +197,9 @@ urlpatterns = [
     path("project-scope-links/", ProjectScopeLinkListCreateAPIView.as_view(), name="project-scope-link-list-create"),
     path("project-scope-links/<int:pk>/", ProjectScopeLinkRetrieveUpdateDeleteAPIView.as_view(), name="project-scope-link-detail"),
     
+    path("projects/create-with-memberships/", ProjectCreateWithMembershipsAPIView.as_view(), name="project-create-with-memberships"),
+    path("project-memberships/", ProjectMembershipListCreateAPIView.as_view(), name="project-membership-list-create"),
+    path("project-memberships/<int:pk>/", ProjectMembershipRetrieveUpdateDeleteAPIView.as_view(), name="project-membership-detail"),
     
     
     

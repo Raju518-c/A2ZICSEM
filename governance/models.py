@@ -943,6 +943,12 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
         ('CANDIDATE_MENTOR_CLASSIFICATION', 'CANDIDATE_MENTOR_CLASSIFICATION'),
     ]
 
+    RULE_DRIVEN_FIELD_CODES = {
+        "QUALION_LEVEL",
+        "DEPLOYABILITY_FLAG",
+        "CANDIDATE_MENTOR_CLASSIFICATION",
+    }
+
     calculation_field_code = models.CharField(
         max_length=40,
         choices=calculation_field_choices,

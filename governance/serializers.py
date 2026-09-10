@@ -69,11 +69,19 @@ class CalculationRuleSerializer(serializers.ModelSerializer):
         if scopes is None:
             scopes = []
 
+        requested_scope_ids = {scope.pk for scope in scopes}
+
         if calculation_field_code == CalculatedFieldCode.QUALION_LEVEL:
             if not concluded_qualion_level:
                 raise serializers.ValidationError({"concluded_qualion_level": "This field is required for QUALION_LEVEL rules."})
 
             duplicate_queryset = CalculationRule.objects.filter(tenant=tenant, calculation_field_code=CalculatedFieldCode.QUALION_LEVEL, concluded_qualion_level=concluded_qualion_level)
+
+            if concluded_deployability_status:
+                raise serializers.ValidationError({"concluded_deployability_status": "Not applicable for QUALION_LEVEL rules."})
+
+            if concluded_classification:
+                raise serializers.ValidationError({"concluded_classification": "Not applicable for QUALION_LEVEL rules."})
 
         elif calculation_field_code == CalculatedFieldCode.DEPLOYABILITY_FLAG:
             if not concluded_deployability_status:
@@ -81,19 +89,29 @@ class CalculationRuleSerializer(serializers.ModelSerializer):
 
             duplicate_queryset = CalculationRule.objects.filter(tenant=tenant, calculation_field_code=CalculatedFieldCode.DEPLOYABILITY_FLAG, concluded_deployability_status=concluded_deployability_status)
 
+            if concluded_qualion_level:
+                raise serializers.ValidationError({"concluded_qualion_level": "Not applicable for DEPLOYABILITY_FLAG rules."})
+
+            if concluded_classification:
+                raise serializers.ValidationError({"concluded_classification": "Not applicable for DEPLOYABILITY_FLAG rules."})
+
         elif calculation_field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
             if not concluded_classification:
                 raise serializers.ValidationError({"concluded_classification": "This field is required for CANDIDATE_MENTOR_CLASSIFICATION rules."})
 
             duplicate_queryset = CalculationRule.objects.filter(tenant=tenant, calculation_field_code=CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION, concluded_classification=concluded_classification)
 
+            if concluded_qualion_level:
+                raise serializers.ValidationError({"concluded_qualion_level": "Not applicable for CANDIDATE_MENTOR_CLASSIFICATION rules."})
+
+            if concluded_deployability_status:
+                raise serializers.ValidationError({"concluded_deployability_status": "Not applicable for CANDIDATE_MENTOR_CLASSIFICATION rules."})
+
         else:
             raise serializers.ValidationError({"calculation_field_code": "Invalid calculation field code."})
 
         if instance:
             duplicate_queryset = duplicate_queryset.exclude(pk=instance.pk)
-
-        requested_scope_ids = {scope.pk for scope in scopes}
 
         for existing_rule in duplicate_queryset.prefetch_related("scope"):
             existing_scope_ids = set(existing_rule.scope.values_list("pk", flat=True))
@@ -106,31 +124,23 @@ class CalculationRuleSerializer(serializers.ModelSerializer):
             if duplicate_scope_ids:
                 raise serializers.ValidationError({"scope": f"A rule already exists for scope ID(s) {sorted(duplicate_scope_ids)} with the same concluded value."})
 
-        model_field_names = {field.name for field in CalculationRule._meta.fields}
+        min_calendar_experience_months = attrs.get("min_calendar_experience_months", getattr(instance, "min_calendar_experience_months", None) if instance else None)
+        max_calendar_experience_months = attrs.get("max_calendar_experience_months", getattr(instance, "max_calendar_experience_months", None) if instance else None)
 
-        if instance:
-            obj = CalculationRule()
+        if min_calendar_experience_months is not None and max_calendar_experience_months is not None and min_calendar_experience_months > max_calendar_experience_months:
+            raise serializers.ValidationError({"max_calendar_experience_months": "Maximum value must be greater than or equal to minimum value."})
 
-            for field_name in model_field_names:
-                if field_name == "id":
-                    continue
+        min_verified_field_days = attrs.get("min_verified_field_days", getattr(instance, "min_verified_field_days", None) if instance else None)
+        max_verified_field_days = attrs.get("max_verified_field_days", getattr(instance, "max_verified_field_days", None) if instance else None)
 
-                if field_name in attrs:
-                    setattr(obj, field_name, attrs[field_name])
-                elif hasattr(instance, field_name):
-                    setattr(obj, field_name, getattr(instance, field_name))
+        if min_verified_field_days is not None and max_verified_field_days is not None and min_verified_field_days > max_verified_field_days:
+            raise serializers.ValidationError({"max_verified_field_days": "Maximum value must be greater than or equal to minimum value."})
 
-        else:
-            model_attrs = {key: value for key, value in attrs.items() if key in model_field_names}
-            obj = CalculationRule(**model_attrs)
+        min_verified_project_count = attrs.get("min_verified_project_count", getattr(instance, "min_verified_project_count", None) if instance else None)
+        max_verified_project_count = attrs.get("max_verified_project_count", getattr(instance, "max_verified_project_count", None) if instance else None)
 
-        try:
-            obj.clean()
-        except ValidationError as exc:
-            if hasattr(exc, "message_dict"):
-                raise serializers.ValidationError(exc.message_dict)
-
-            raise serializers.ValidationError(exc.messages)
+        if min_verified_project_count is not None and max_verified_project_count is not None and min_verified_project_count > max_verified_project_count:
+            raise serializers.ValidationError({"max_verified_project_count": "Maximum value must be greater than or equal to minimum value."})
 
         return attrs
 

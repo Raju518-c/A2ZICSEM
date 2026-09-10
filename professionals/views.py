@@ -10,7 +10,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 
+from governance.views import *
 from accounts.models import UserTbl
+from rest_framework.test import APIRequestFactory
 
 from .models import (
     CapabilityRecord,
@@ -148,6 +150,46 @@ class ProfessionalReviewRetrieveUpdateDeleteAPIView(APIView):
         return Response({"success": True, "message": "Professional review deleted successfully."}, status=status.HTTP_200_OK)
 
 
+class Stage2CalculationError(Exception):
+    def __init__(self, message, calculation_type=None, details=None):
+        self.message = message
+        self.calculation_type = calculation_type
+        self.details = details
+        super().__init__(message)
+
+
+def run_stage2_calculations(professional_id):
+    factory = APIRequestFactory()
+
+    fixed_fields_request = factory.post("/professional/calculated-fields/", {"professional_profile_id": professional_id}, format="json")
+    fixed_fields_response = ProfessionalCalculatedFieldsAPIView.as_view()(fixed_fields_request)
+
+    if fixed_fields_response.status_code < 200 or fixed_fields_response.status_code >= 300:
+        raise Stage2CalculationError("12-field calculation failed.", calculation_type="FIXED_12_FIELDS", details=getattr(fixed_fields_response, "data", None))
+
+    fixed_fields_data = getattr(fixed_fields_response, "data", {}) or {}
+
+    if isinstance(fixed_fields_data, dict) and fixed_fields_data.get("success") is False:
+        raise Stage2CalculationError("12-field calculation failed.", calculation_type="FIXED_12_FIELDS", details=fixed_fields_data)
+
+    rule_fields_request = factory.post(f"/calculated-fields/rule-calculate/{professional_id}/", {}, format="json")
+    rule_fields_response = ProfessionalRuleCalculatedFieldsAPIView.as_view()(rule_fields_request, pk=professional_id)
+
+    if rule_fields_response.status_code < 200 or rule_fields_response.status_code >= 300:
+        raise Stage2CalculationError("3 rule-driven fields calculation failed.", calculation_type="RULE_DRIVEN_3_FIELDS", details=getattr(rule_fields_response, "data", None))
+
+    rule_fields_data = getattr(rule_fields_response, "data", {}) or {}
+
+    if isinstance(rule_fields_data, dict) and rule_fields_data.get("success") is False:
+        raise Stage2CalculationError("3 rule-driven fields calculation failed.", calculation_type="RULE_DRIVEN_3_FIELDS", details=rule_fields_data)
+
+    return {
+        "fixed_12_fields": fixed_fields_data,
+        "rule_driven_3_fields": rule_fields_data,
+    }
+    
+  
+    
 @method_decorator(csrf_exempt, name='dispatch')
 class Stage2SubmitAPIView(APIView):
     """
@@ -215,18 +257,20 @@ class Stage2SubmitAPIView(APIView):
 
         if not professional.credentials.filter(record_type="EDUCATION").exists():
             missing.append("education")
+
         if not is_fresher and not professional.employment_records.exists():
             missing.append("employment")
+
         if not is_fresher and not professional.project_records.exists():
             missing.append("project_experience")
+
         if not professional.capabilities.filter(capability_type="LANGUAGE").exists():
             missing.append("languages")
+
         if not professional.availability_status:
             missing.append("availability")
-        if not professional.consent_records.filter(
-            consent_type__in=["PROFILE_ACCURACY", "CONFLICT_OF_INTEREST"],
-            is_granted=True,
-        ).count() >= 2:
+
+        if not professional.consent_records.filter(consent_type__in=["PROFILE_ACCURACY", "CONFLICT_OF_INTEREST"], is_granted=True).count() >= 2:
             missing.append("declarations")
 
         return {"ok": not missing, "missing": missing}
@@ -236,62 +280,66 @@ class Stage2SubmitAPIView(APIView):
         try:
             professional = ProfessionalProfile.objects.select_related("tenant", "user").get(pk=prof_id)
         except ProfessionalProfile.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Professional profile not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"success": False, "message": "Professional profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if professional.profile_status not in (
-            ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE,
-            ProfessionalProfile.ProfileStatus.RETURNED,
-        ):
-            return Response(
-                {
-                    "success": False,
-                    "message": f"Cannot submit Stage 2 from status={professional.profile_status}.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if professional.profile_status not in (ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE, ProfessionalProfile.ProfileStatus.RETURNED):
+            return Response({"success": False, "message": f"Cannot submit Stage 2 from status={professional.profile_status}."}, status=status.HTTP_400_BAD_REQUEST)
 
         completeness = self._check_required_sections(professional)
+
         if not completeness["ok"]:
-            return Response(
-                {
-                    "success": False,
-                    "message": "Stage 2 incomplete.",
-                    "missing_sections": completeness["missing"],
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"success": False, "message": "Stage 2 incomplete.", "missing_sections": completeness["missing"]}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
 
-        with transaction.atomic():
-            review = ProfessionalReview.objects.create(
-                tenant=professional.tenant,
-                professional=professional,
-                review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
-                profile_version=professional.profile_version,
-                submitted_by=professional.user,
-                submitted_at=now,
-                previous_classification=professional.current_classification,
-            )
+        try:
+            with transaction.atomic():
+                review = ProfessionalReview.objects.create(
+                    tenant=professional.tenant,
+                    professional=professional,
+                    review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
+                    profile_version=professional.profile_version,
+                    submitted_by=professional.user,
+                    submitted_at=now,
+                    previous_classification=professional.current_classification,
+                )
 
-            professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
-            professional.save(update_fields=["profile_status", "updated_at"])
+                professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
+                professional.save(update_fields=["profile_status", "updated_at"])
 
-        return Response(
-            {
-                "success": True,
-                "message": "Stage 2 submitted for review.",
-                "data": {
-                    "review_id": review.id,
-                    "profile_status": professional.profile_status,
-                    "submitted_at": review.submitted_at,
+                calculation_result = run_stage2_calculations(professional.id)
+
+        except Stage2CalculationError as exc:
+            return Response({
+                "success": False,
+                "message": "Stage 2 submission failed because calculated fields could not be completed.",
+                "calculation_type": exc.calculation_type,
+                "calculation_error": exc.message,
+                "details": exc.details,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as exc:
+            return Response({
+                "success": False,
+                "message": "Stage 2 submission failed.",
+                "error": str(exc),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        professional.refresh_from_db()
+
+        return Response({
+            "success": True,
+            "message": "Stage 2 submitted for review.",
+            "data": {
+                "review_id": review.id,
+                "profile_status": professional.profile_status,
+                "submitted_at": review.submitted_at,
+                "calculations": {
+                    "fixed_12_fields": "COMPLETED",
+                    "rule_driven_3_fields": "COMPLETED",
                 },
             },
-            status=status.HTTP_200_OK,
-        )
+        }, status=status.HTTP_200_OK)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -499,60 +547,67 @@ class ProfessionalReviewResubmitAPIView(APIView):
         try:
             professional = ProfessionalProfile.objects.select_related("tenant", "user").get(pk=prof_id)
         except ProfessionalProfile.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Professional profile not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"success": False, "message": "Professional profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
         if professional.profile_status != ProfessionalProfile.ProfileStatus.RETURNED:
-            return Response(
-                {
-                    "success": False,
-                    "message": f"Cannot resubmit from status={professional.profile_status}.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"success": False, "message": f"Cannot resubmit from status={professional.profile_status}."}, status=status.HTTP_400_BAD_REQUEST)
 
         completeness = Stage2SubmitAPIView()._check_required_sections(professional)
+
         if not completeness["ok"]:
-            return Response(
-                {
-                    "success": False,
-                    "message": "Stage 2 still incomplete.",
-                    "missing_sections": completeness["missing"],
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"success": False, "message": "Stage 2 still incomplete.", "missing_sections": completeness["missing"]}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
 
-        with transaction.atomic():
-            professional.profile_version += 1
-            professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
-            professional.save(update_fields=["profile_version", "profile_status", "updated_at"])
+        try:
+            with transaction.atomic():
+                professional.profile_version += 1
+                professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
+                professional.save(update_fields=["profile_version", "profile_status", "updated_at"])
 
-            review = ProfessionalReview.objects.create(
-                tenant=professional.tenant,
-                professional=professional,
-                review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
-                profile_version=professional.profile_version,
-                submitted_by=professional.user,
-                submitted_at=now,
-                previous_classification=professional.current_classification,
-            )
+                review = ProfessionalReview.objects.create(
+                    tenant=professional.tenant,
+                    professional=professional,
+                    review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
+                    profile_version=professional.profile_version,
+                    submitted_by=professional.user,
+                    submitted_at=now,
+                    previous_classification=professional.current_classification,
+                )
 
-        return Response(
-            {
-                "success": True,
-                "message": "Stage 2 resubmitted for review.",
-                "data": {
-                    "review_id": review.id,
-                    "profile_version": professional.profile_version,
-                    "profile_status": professional.profile_status,
+                calculation_result = run_stage2_calculations(professional.id)
+
+        except Stage2CalculationError as exc:
+            return Response({
+                "success": False,
+                "message": "Stage 2 resubmission failed because calculated fields could not be completed.",
+                "calculation_type": exc.calculation_type,
+                "calculation_error": exc.message,
+                "details": exc.details,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as exc:
+            return Response({
+                "success": False,
+                "message": "Stage 2 resubmission failed.",
+                "error": str(exc),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        professional.refresh_from_db()
+
+        return Response({
+            "success": True,
+            "message": "Stage 2 resubmitted for review.",
+            "data": {
+                "review_id": review.id,
+                "profile_version": professional.profile_version,
+                "profile_status": professional.profile_status,
+                "calculations": {
+                    "fixed_12_fields": "COMPLETED",
+                    "rule_driven_3_fields": "COMPLETED",
                 },
             },
-            status=status.HTTP_200_OK,
-        )
+        }, status=status.HTTP_200_OK)
 
 
 class ProfessionalReviewStatusAPIView(APIView):

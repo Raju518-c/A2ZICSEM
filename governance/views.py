@@ -1,14 +1,26 @@
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema
-# Create your views here.
+from drf_spectacular.utils import extend_schema, OpenApiExample
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import *
 from .serializers import *
+from datetime import timedelta
+from decimal import Decimal
+from collections import defaultdict
+from datetime import date
+from django.db import transaction
+from django.db.models import Prefetch
+from django.utils import timezone
+
+from professionals.models import *
+from experience.models import *
+from competency.models import *
+from catalog.models import *
+from .governance_calculation_engine import *
 
 @method_decorator(csrf_exempt, name='dispatch')
 class AuditEventListCreateAPIView(APIView):
@@ -722,27 +734,6 @@ CalculationRuleSet/CalculationRule CRUD views already built. Same style:
 csrf_exempt + AllowAny, {success, message, data} envelope.
 """
 
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from catalog.models import ScopeCatalog
-from governance.models import CalculatedFieldCode, CalculatedFieldOverride
-from governance.serializers import CalculatedFieldOverrideSerializer
-from .governance_calculation_engine import (
-    FIELD_HANDLERS,
-    FIXED_FIELD_CODES,
-    SCOPED_FIELDS,
-    CalculationError,
-    apply_calculated_value,
-    calculate_fixed_fields_for_professional,
-)
-from professionals.models import ProfessionalProfile
-
 
 # ============================================================
 # 1. System decides the value and saves it into the respective table
@@ -1110,39 +1101,6 @@ class CalculateFixedSystemFieldsAPIView(APIView):
             status=status.HTTP_200_OK,
         )
         
- 
-
-
-from collections import defaultdict
-from datetime import date
-from decimal import Decimal
-
-from django.db import transaction
-from django.db.models import Prefetch
-from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from drf_spectacular.utils import extend_schema, OpenApiExample
-
-from professionals.models import (
-    ProfessionalProfile,
-    CredentialRecord,
-)
-
-from experience.models import (
-    ProjectRecord,
-    ProjectScope,
-    ScopeResponse,
-)
-
-from competency.models import ProfessionalScope
-
 
 # ============================================================
 # PROJECT VERIFICATION STATUSES REQUESTED BY YOU
@@ -2624,4 +2582,704 @@ class ProfessionalCalculatedFieldsAPIView(APIView):
             status=status.HTTP_200_OK,
         )
                 
+        
+      
+      
+      
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
+def get_reference_rank(reference_value):
+    """
+    Returns ReferenceValue.sort_order.
+
+    Used for:
+        QUALION_LEVEL
+        AUTHORITY_STATUS
+        COMPLEXITY
+    """
+    if not reference_value:
+        return None
+
+    return getattr(reference_value, "sort_order", None)
+
+
+def numeric_range_satisfied(actual_value, minimum_value=None, maximum_value=None):
+    """
+    Checks numeric value against optional minimum and maximum.
+
+    Examples:
+        min=12, max=24, actual=18 -> True
+        min=12, max=24, actual=30 -> False
+        min=12, max=None, actual=18 -> True
+        min=None, max=24, actual=18 -> True
+
+    If both minimum and maximum are empty, condition is ignored.
+    """
+    if minimum_value is None and maximum_value is None:
+        return True
+
+    if actual_value is None:
+        return False
+
+    if minimum_value is not None and actual_value < minimum_value:
+        return False
+
+    if maximum_value is not None and actual_value > maximum_value:
+        return False
+
+    return True
+
+
+def reference_range_satisfied(actual_value, minimum_value=None, maximum_value=None):
+    """
+    Checks ReferenceValue using sort_order.
+
+    Example:
+        minimum = L2
+        maximum = L4
+        actual = L3
+
+        L2.sort_order <= L3.sort_order <= L4.sort_order
+    """
+    if minimum_value is None and maximum_value is None:
+        return True
+
+    if actual_value is None:
+        return False
+
+    actual_rank = get_reference_rank(actual_value)
+
+    if actual_rank is None:
+        return False
+
+    if minimum_value is not None:
+        minimum_rank = get_reference_rank(minimum_value)
+
+        if minimum_rank is None or actual_rank < minimum_rank:
+            return False
+
+    if maximum_value is not None:
+        maximum_rank = get_reference_rank(maximum_value)
+
+        if maximum_rank is None or actual_rank > maximum_rank:
+            return False
+
+    return True
+
+
+def minimum_reference_satisfied(actual_value, minimum_value):
+    """
+    Minimum-only ReferenceValue comparison.
+    """
+    return reference_range_satisfied(actual_value, minimum_value=minimum_value)
+
+
+# ============================================================
+# CALCULATION RULE SCOPE HELPERS
+# ============================================================
+
+def get_rule_scope_ids(rule):
+    """
+    CalculationRule.scope is now ManyToManyField.
+
+    Empty scope list means tenant-wide.
+    """
+    return {scope.pk for scope in rule.scope.all()}
+
+
+def is_tenant_wide_rule(rule):
+    """
+    Empty CalculationRule.scope = tenant-wide rule.
+    """
+    return len(get_rule_scope_ids(rule)) == 0
+
+
+def rule_applies_to_professional_scope(rule, professional_scope):
+    """
+    Returns True when the ProfessionalScope's ScopeCatalog is one of
+    the scopes selected in CalculationRule.scope.
+    """
+    return professional_scope.scope_id in get_rule_scope_ids(rule)
+
+
+# ============================================================
+# PROFESSIONAL SCOPE HELPERS
+# ============================================================
+
+def get_scope_authority(professional_scope):
+    """
+    Prefer current_authority_status if available.
+
+    Your existing 12-field calculation stores
+    highest_authority_reached, so this is used as fallback.
+    """
+    current_authority = getattr(professional_scope, "current_authority_status", None)
+
+    if current_authority:
+        return current_authority
+
+    return getattr(professional_scope, "highest_authority_reached", None)
+
+
+def get_scope_complexity(professional_scope):
+    """
+    Complexity parameter used by QUALION_LEVEL rules.
+    """
+    return getattr(professional_scope, "complexity_rating", None)
+
+
+# ============================================================
+# CREDENTIAL HELPERS
+# ============================================================
+
+def get_reference_identifier(reference_value):
+    """
+    Returns multiple possible identifiers from a ReferenceValue.
+    This helps when CredentialRecord.record_type is stored as a string
+    while CalculationRule.required_credential_types stores ReferenceValue.
+    """
+    if reference_value is None:
+        return set()
+
+    values = {str(reference_value.pk)}
+
+    for field_name in ["code", "value", "name"]:
+        field_value = getattr(reference_value, field_name, None)
+
+        if field_value:
+            values.add(str(field_value).strip().upper())
+
+    return values
+
+
+def credential_type_matches(credential, required_type):
+    """
+    Supports either:
+        CredentialRecord.credential_type -> ReferenceValue
+    or:
+        CredentialRecord.record_type -> string/ReferenceValue
+    """
+    credential_type = getattr(credential, "credential_type", None)
+
+    if credential_type is not None:
+        if hasattr(credential_type, "pk"):
+            return credential_type.pk == required_type.pk
+
+        return str(credential_type).strip().upper() in get_reference_identifier(required_type)
+
+    record_type = getattr(credential, "record_type", None)
+
+    if record_type is None:
+        return False
+
+    if hasattr(record_type, "pk"):
+        return record_type.pk == required_type.pk
+
+    return str(record_type).strip().upper() in get_reference_identifier(required_type)
+
+
+def credential_matches_scope(credential, professional_scope):
+    """
+    If CredentialRecord contains a scope relation, require same scope.
+
+    If CredentialRecord has no scope field or scope is empty,
+    treat the credential as professional-wide.
+    """
+    credential_scope = getattr(credential, "scope", None)
+
+    if credential_scope is None:
+        return True
+
+    if hasattr(credential_scope, "all"):
+        credential_scope_ids = {scope.pk for scope in credential_scope.all()}
+        return not credential_scope_ids or professional_scope.scope_id in credential_scope_ids
+
+    if hasattr(credential_scope, "pk"):
+        return credential_scope.pk == professional_scope.scope_id
+
+    return True
+
+
+def get_matching_credentials(rule, professional_scope, credentials):
+    """
+    Returns credentials satisfying the CalculationRule conditions:
+
+        required_credential_types
+        require_active_credential
+        max_days_to_credential_expiry
+        scope
+    """
+    required_types = list(rule.required_credential_types.all())
+
+    if not required_types:
+        return []
+
+    today = timezone.localdate()
+    matches = []
+
+    for credential in credentials:
+        if not credential_matches_scope(credential, professional_scope):
+            continue
+
+        if not any(credential_type_matches(credential, required_type) for required_type in required_types):
+            continue
+
+        if rule.require_active_credential:
+            credential_status = getattr(credential, "status", None)
+
+            if credential_status != "ACTIVE":
+                continue
+
+        if rule.max_days_to_credential_expiry is not None:
+            expiry_date = getattr(credential, "expiry_date", None)
+
+            if expiry_date is None:
+                continue
+
+            days_remaining = (expiry_date - today).days
+
+            if days_remaining < 0:
+                continue
+
+            if days_remaining > rule.max_days_to_credential_expiry:
+                continue
+
+        matches.append(credential)
+
+    return matches
+
+
+def credential_condition_satisfied(rule, professional_scope, credentials):
+    """
+    At least one credential must match when required_credential_types
+    contains values.
+
+    If no credential types are configured, the condition is ignored.
+    """
+    required_types = list(rule.required_credential_types.all())
+
+    if not required_types:
+        return True
+
+    return bool(get_matching_credentials(rule, professional_scope, credentials))
+
+
+# ============================================================
+# ASSESSMENT HELPERS
+# ============================================================
+
+def get_latest_assessment(professional_scope):
+    """
+    Gets latest CompetencyAssessment for this ProfessionalScope.
+    """
+    return CompetencyAssessment.objects.filter(professional_scope=professional_scope).order_by("-created_at").first()
+
+
+def has_unresolved_reclassification_rejection(profile):
+    """
+    Checks whether professional has unresolved REJECTED
+    ProfessionalReview of type RECLASSIFICATION.
+    """
+    model_fields = {field.name for field in ProfessionalReview._meta.get_fields()}
+    filters = {"professional": profile}
+
+    if "review_type" in model_fields:
+        filters["review_type"] = "RECLASSIFICATION"
+
+    if "decision" in model_fields:
+        filters["decision"] = "REJECTED"
+    elif "status" in model_fields:
+        filters["status"] = "REJECTED"
+    else:
+        return False
+
+    queryset = ProfessionalReview.objects.filter(**filters)
+
+    if "resolved_at" in model_fields:
+        queryset = queryset.filter(resolved_at__isnull=True)
+
+    return queryset.exists()
+
+
+# ============================================================
+# RULE EVALUATION
+# ============================================================
+
+def evaluate_rule(rule, professional_scope, profile, credentials):
+    """
+    Evaluates one CalculationRule against one ProfessionalScope.
+
+    ALL_CONDITIONS:
+        Every populated logical condition must match.
+
+    ANY_CONDITION:
+        At least one populated logical condition must match.
+
+    Important:
+        min/max belong to ONE logical range condition.
+
+    Example:
+        min_calendar_experience_months = 12
+        max_calendar_experience_months = 24
+
+    Becomes:
+        12 <= actual <= 24
+    """
+    checks = []
+    field_code = rule.calculation_field_code
+    authority = get_scope_authority(professional_scope)
+
+    # ========================================================
+    # 1. QUALION LEVEL
+    # ========================================================
+
+    if field_code == CalculatedFieldCode.QUALION_LEVEL:
+
+        # Calendar experience range
+        if rule.min_calendar_experience_months is not None or rule.max_calendar_experience_months is not None:
+            actual_value = professional_scope.calendar_experience_months or 0
+            checks.append(numeric_range_satisfied(actual_value, rule.min_calendar_experience_months, rule.max_calendar_experience_months))
+
+        # Verified field days range
+        if rule.min_verified_field_days is not None or rule.max_verified_field_days is not None:
+            actual_value = professional_scope.verified_field_days or Decimal("0")
+            checks.append(numeric_range_satisfied(actual_value, rule.min_verified_field_days, rule.max_verified_field_days))
+
+        # Verified project count range
+        if rule.min_verified_project_count is not None or rule.max_verified_project_count is not None:
+            actual_value = professional_scope.verified_project_count or 0
+            checks.append(numeric_range_satisfied(actual_value, rule.min_verified_project_count, rule.max_verified_project_count))
+
+        # Minimum authority
+        if rule.min_authority_status_id:
+            checks.append(minimum_reference_satisfied(authority, rule.min_authority_status))
+
+        # Minimum complexity
+        if rule.min_complexity_rating_id:
+            actual_complexity = get_scope_complexity(professional_scope)
+            checks.append(minimum_reference_satisfied(actual_complexity, rule.min_complexity_rating))
+
+        # Required credentials
+        if rule.required_credential_types.all():
+            checks.append(credential_condition_satisfied(rule, professional_scope, credentials))
+
+    # ========================================================
+    # 2. DEPLOYABILITY FLAG
+    # ========================================================
+
+    elif field_code == CalculatedFieldCode.DEPLOYABILITY_FLAG:
+
+        # Qualion level range
+        if rule.min_qualion_level_id or rule.max_qualion_level_id:
+            checks.append(reference_range_satisfied(professional_scope.current_qualion_level, rule.min_qualion_level, rule.max_qualion_level))
+
+        # Minimum authority
+        if rule.min_authority_status_id:
+            checks.append(minimum_reference_satisfied(authority, rule.min_authority_status))
+
+        # Credentials, active status and expiry
+        if rule.required_credential_types.all():
+            checks.append(credential_condition_satisfied(rule, professional_scope, credentials))
+
+    # ========================================================
+    # 3. CANDIDATE / MENTOR CLASSIFICATION
+    # ========================================================
+
+    elif field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
+
+        # Qualion level range
+        if rule.min_qualion_level_id or rule.max_qualion_level_id:
+            checks.append(reference_range_satisfied(professional_scope.current_qualion_level, rule.min_qualion_level, rule.max_qualion_level))
+
+        # Minimum authority
+        if rule.min_authority_status_id:
+            checks.append(minimum_reference_satisfied(authority, rule.min_authority_status))
+
+        latest_assessment = None
+
+        if rule.min_ethics_independence_score is not None or rule.require_latest_assessment_decision:
+            latest_assessment = get_latest_assessment(professional_scope)
+
+        # Minimum ethics score
+        if rule.min_ethics_independence_score is not None:
+            actual_score = getattr(latest_assessment, "ethics_independence_score", None) if latest_assessment else None
+            checks.append(actual_score is not None and actual_score >= rule.min_ethics_independence_score)
+
+        # Required latest assessment decision
+        if rule.require_latest_assessment_decision:
+            actual_decision = getattr(latest_assessment, "decision", None) if latest_assessment else None
+            checks.append(actual_decision == rule.require_latest_assessment_decision)
+
+        # Pending rejection block
+        if rule.block_if_pending_rejection:
+            checks.append(not has_unresolved_reclassification_rejection(profile))
+
+    # ========================================================
+    # MATCH RESULT
+    # ========================================================
+
+    # Empty rule can act as final/default fallback rule
+    if not checks:
+        return True
+
+    if rule.match_type == CalculationRule.MatchType.ANY_CONDITION:
+        return any(checks)
+
+    return all(checks)
+
+
+# ============================================================
+# FIND FIRST MATCHING RULE
+# ============================================================
+
+def find_matching_rule(rules, professional_scope, profile, credentials):
+    """
+    First matching rule wins.
+
+    Rules must already be ordered by sequence.
+    """
+    for rule in rules:
+        if evaluate_rule(rule, professional_scope, profile, credentials):
+            return rule
+
+    return None
+
+
+# ============================================================
+# BEST PROFESSIONAL SCOPE
+# ============================================================
+
+def get_best_professional_scope(professional_scopes):
+    """
+    Used for tenant-wide CANDIDATE_MENTOR_CLASSIFICATION.
+
+    Priority:
+        1. current_qualion_level
+        2. authority
+        3. calendar_experience_months
+        4. verified_field_days
+    """
+    if not professional_scopes:
+        return None
+
+    def sort_key(professional_scope):
+        qualion_rank = get_reference_rank(professional_scope.current_qualion_level) or 0
+        authority_rank = get_reference_rank(get_scope_authority(professional_scope)) or 0
+        experience = professional_scope.calendar_experience_months or 0
+        field_days = professional_scope.verified_field_days or Decimal("0")
+
+        return qualion_rank, authority_rank, experience, field_days
+
+    return max(professional_scopes, key=sort_key)
+
+
+# ============================================================
+# RESPONSE VALUE HELPERS
+# ============================================================
+
+def reference_value_response(reference_value):
+    """
+    Returns simple API-friendly ReferenceValue information.
+    """
+    if reference_value is None:
+        return None
+
+    return {
+        "id": reference_value.pk,
+        "code": getattr(reference_value, "code", None),
+        "name": getattr(reference_value, "name", None),
+        "value": getattr(reference_value, "value", None),
+        "sort_order": getattr(reference_value, "sort_order", None),
+        "display": str(reference_value),
+    }
+
+
+# ============================================================
+# API
+# ============================================================
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProfessionalRuleCalculatedFieldsAPIView(APIView):
+    """
+    Calculates the 3 CalculationRule-driven fields.
+
+    Calculation order:
+
+        1. QUALION_LEVEL
+        2. DEPLOYABILITY_FLAG
+        3. CANDIDATE_MENTOR_CLASSIFICATION
+
+    Input:
+        ProfessionalProfile pk from URL.
+
+    Example:
+        POST /professional/rule-calculated-fields/25/
+
+    No request body required.
+    """
+
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def post(self, request, pk):
+
+        # ====================================================
+        # 1. PROFESSIONAL PROFILE
+        # ====================================================
+
+        try:
+            profile = ProfessionalProfile.objects.select_for_update().get(pk=pk)
+        except ProfessionalProfile.DoesNotExist:
+            return Response({"success": False, "message": "ProfessionalProfile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # ====================================================
+        # 2. PROFESSIONAL SCOPES
+        # ====================================================
+
+        professional_scopes = list(ProfessionalScope.objects.select_for_update().filter(professional=profile, tenant=profile.tenant).select_related("scope", "current_qualion_level", "highest_authority_reached"))
+
+        if not professional_scopes:
+            return Response({"success": False, "message": "No ProfessionalScope records found. Run the existing 12-field calculated-fields API first.", "professional_profile_id": str(profile.pk)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ====================================================
+        # 3. PROFESSIONAL CREDENTIALS
+        # ====================================================
+
+        credentials = list(CredentialRecord.objects.filter(professional=profile, tenant=profile.tenant))
+
+        # ====================================================
+        # 4. ACTIVE CALCULATION RULES
+        # ====================================================
+
+        all_rules = list(CalculationRule.objects.filter(tenant=profile.tenant, is_active=True, calculation_field_code__in=[CalculatedFieldCode.QUALION_LEVEL, CalculatedFieldCode.DEPLOYABILITY_FLAG, CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION]).select_related("min_qualion_level", "max_qualion_level", "min_authority_status", "min_complexity_rating", "concluded_qualion_level").prefetch_related("scope", "required_credential_types").order_by("calculation_field_code", "sequence"))
+
+        scope_results = []
+
+        # ====================================================
+        # 5. QUALION LEVEL
+        # ====================================================
+
+        for professional_scope in professional_scopes:
+
+            qualion_rules = [rule for rule in all_rules if rule.calculation_field_code == CalculatedFieldCode.QUALION_LEVEL and rule_applies_to_professional_scope(rule, professional_scope)]
+
+            matched_qualion_rule = find_matching_rule(qualion_rules, professional_scope, profile, credentials)
+
+            previous_qualion = professional_scope.current_qualion_level
+
+            if matched_qualion_rule:
+                professional_scope.current_qualion_level = matched_qualion_rule.concluded_qualion_level
+                professional_scope.save(update_fields=["current_qualion_level"])
+
+            scope_results.append({
+                "professional_scope_id": str(professional_scope.pk),
+                "scope_id": professional_scope.scope_id,
+                "scope": getattr(professional_scope.scope, "scope_name", str(professional_scope.scope)),
+                "qualion_level": {
+                    "previous": reference_value_response(previous_qualion),
+                    "calculated": reference_value_response(professional_scope.current_qualion_level) if matched_qualion_rule else None,
+                    "matched_rule_id": matched_qualion_rule.pk if matched_qualion_rule else None,
+                    "matched_rule": matched_qualion_rule.label if matched_qualion_rule else None,
+                    "requires_four_eyes_approval": matched_qualion_rule.requires_four_eyes_approval if matched_qualion_rule else False,
+                }
+            })
+
+        # ====================================================
+        # REFRESH PROFESSIONAL SCOPES
+        # Deployability depends on newly calculated Qualion.
+        # ====================================================
+
+        professional_scopes = list(ProfessionalScope.objects.filter(professional=profile, tenant=profile.tenant).select_related("scope", "current_qualion_level", "highest_authority_reached"))
+
+        # ====================================================
+        # 6. DEPLOYABILITY FLAG
+        # ====================================================
+
+        for professional_scope in professional_scopes:
+
+            deployability_rules = [rule for rule in all_rules if rule.calculation_field_code == CalculatedFieldCode.DEPLOYABILITY_FLAG and rule_applies_to_professional_scope(rule, professional_scope)]
+
+            matched_deployability_rule = find_matching_rule(deployability_rules, professional_scope, profile, credentials)
+
+            previous_status = getattr(professional_scope, "deployability_status", None)
+
+            if matched_deployability_rule:
+                professional_scope.deployability_status = matched_deployability_rule.concluded_deployability_status
+                professional_scope.save(update_fields=["deployability_status"])
+
+            response_row = next((row for row in scope_results if row["professional_scope_id"] == str(professional_scope.pk)), None)
+
+            if response_row is not None:
+                response_row["deployability"] = {
+                    "previous": previous_status,
+                    "calculated": matched_deployability_rule.concluded_deployability_status if matched_deployability_rule else None,
+                    "matched_rule_id": matched_deployability_rule.pk if matched_deployability_rule else None,
+                    "matched_rule": matched_deployability_rule.label if matched_deployability_rule else None,
+                    "requires_four_eyes_approval": matched_deployability_rule.requires_four_eyes_approval if matched_deployability_rule else False,
+                }
+
+        # ====================================================
+        # REFRESH AGAIN BEFORE CLASSIFICATION
+        # ====================================================
+
+        professional_scopes = list(ProfessionalScope.objects.filter(professional=profile, tenant=profile.tenant).select_related("scope", "current_qualion_level", "highest_authority_reached"))
+
+        # ====================================================
+        # 7. BEST PROFESSIONAL SCOPE
+        # ====================================================
+
+        best_scope = get_best_professional_scope(professional_scopes)
+
+        # ====================================================
+        # 8. CANDIDATE / MENTOR CLASSIFICATION
+        # ====================================================
+
+        classification_result = None
+
+        if best_scope:
+
+            tenant_wide_rules = [rule for rule in all_rules if rule.calculation_field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION and is_tenant_wide_rule(rule)]
+
+            if tenant_wide_rules:
+                classification_rules = tenant_wide_rules
+            else:
+                classification_rules = [rule for rule in all_rules if rule.calculation_field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION and rule_applies_to_professional_scope(rule, best_scope)]
+
+            matched_classification_rule = find_matching_rule(classification_rules, best_scope, profile, credentials)
+
+            previous_classification = profile.current_classification
+
+            if matched_classification_rule:
+                profile.current_classification = matched_classification_rule.concluded_classification
+                profile.save(update_fields=["current_classification"])
+
+            classification_result = {
+                "best_professional_scope_id": str(best_scope.pk),
+                "scope_id": best_scope.scope_id,
+                "scope": getattr(best_scope.scope, "scope_name", str(best_scope.scope)),
+                "previous": previous_classification,
+                "calculated": matched_classification_rule.concluded_classification if matched_classification_rule else None,
+                "matched_rule_id": matched_classification_rule.pk if matched_classification_rule else None,
+                "matched_rule": matched_classification_rule.label if matched_classification_rule else None,
+                "requires_four_eyes_approval": matched_classification_rule.requires_four_eyes_approval if matched_classification_rule else False,
+            }
+
+        # ====================================================
+        # 9. FINAL RESPONSE
+        # ====================================================
+
+        return Response({
+            "success": True,
+            "message": "Rule-driven system calculated fields calculated successfully.",
+            "professional_profile_id": str(profile.pk),
+            "scope_results": scope_results,
+            "candidate_mentor_classification": classification_result,
+        }, status=status.HTTP_200_OK)
+
+             
+
+                      
+
         

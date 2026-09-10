@@ -91,5 +91,9 @@ urlpatterns = [
         ProfessionalCalculatedFieldsAPIView.as_view(),
         name="professional-calculated-fields",
     ),
-
+    path(
+        "calculated-fields/rule-calculate/<int:pk>/",
+        ProfessionalRuleCalculatedFieldsAPIView.as_view(),
+        name="professional-rule-calculated-fields",
+    ),
 ]

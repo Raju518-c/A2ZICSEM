@@ -194,6 +194,8 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
             "expected_rate",
             "rate_currency",
             "ppe_sizes",
+            "industries_served",
+            "total_career_experience_months",
             "submitted_at",
             "approved_at",
             "employment_records",

@@ -471,6 +471,7 @@ class ScopeResponse(TenantOwnedModel, TimeStampedModel):
     )
     repeat_group_key = models.UUIDField(
         default=uuid.uuid4,
+        null=True,blank=True,
         help_text="Groups repeated fields into one logical record. "
         "Non-repeatable fields use one standard group; repeatable fields "
         "may use many.",

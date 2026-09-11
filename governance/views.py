@@ -3097,7 +3097,7 @@ ALLOWED_PROJECT_VERIFICATION_STATUSES = [
     "SELF_DECLARED",
     "EVIDENCE_UPLOADED",
     "VERIFIED",
-    "REJECTED",
+    "VALIDATED",
 ]
 
 
@@ -3298,8 +3298,8 @@ def get_highest_authority(project_scope_rows):
     for project_scope in project_scope_rows:
 
         # Sheet explicitly says VERIFIED authority.
-        if project_scope.verification_status != "VERIFIED":
-            continue
+        # if project_scope.verification_status != "VERIFIED":
+        #     continue
 
         authority = project_scope.authority_action
 

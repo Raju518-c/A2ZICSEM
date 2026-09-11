@@ -438,7 +438,7 @@ class BulkProjectRecordSerializer(serializers.Serializer):
 
                             repeat_group_key=response_payload.get(
                                 "repeat_group_key"
-                            ),
+                            ) or "",
 
                             repeat_index=response_payload.get(
                                 "repeat_index",

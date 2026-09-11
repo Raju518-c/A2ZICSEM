@@ -149,17 +149,22 @@ class Calculated2FieldCode(models.TextChoices):
         "Candidate/Mentor classification",
     )
 
-class CalculatedFieldOverride(UUIDModel, TenantOwnedModel, CreatedOnlyModel):
-    """One override/correction request against a system-calculated field,
-    carried through recommendation and final decision.
 
-    Key rules: system_calculated_value is a snapshot and is never edited
-    after creation. requested_by can never equal approved_by. reviewed_by
-    (recommendation) and approved_by (final decision) are always
-    distinguishable, even when the same person is technically eligible
-    for both roles on a low-risk field. Approved records are immutable;
-    a later correction creates a new row referencing this one via
-    supersedes, preserving the full chain.
+
+
+class CalculatedFieldOverride(UUIDModel, TenantOwnedModel, TimeStampedModel):
+    """
+    Stores ONLY the latest/current admin override for a calculated field.
+
+    One row per:
+        professional
+        + calculation_field_code
+        + target object
+
+    If the admin changes the same field again, this row is UPDATED,
+    not recreated.
+
+    Full historical changes are stored in CalculatedFieldValueHistory.
     """
 
     class RequestType(models.TextChoices):
@@ -178,189 +183,196 @@ class CalculatedFieldOverride(UUIDModel, TenantOwnedModel, CreatedOnlyModel):
     class OverrideReasonCode(models.TextChoices):
         SOURCE_DATA_INCORRECT = "SOURCE_DATA_INCORRECT", "Source data incorrect"
         SOURCE_DATA_INCOMPLETE = "SOURCE_DATA_INCOMPLETE", "Source data incomplete"
-        RULE_DOES_NOT_FIT_SITUATION = (
-            "RULE_DOES_NOT_FIT_SITUATION",
-            "Automated rule does not represent the professional situation",
-        )
+        RULE_DOES_NOT_FIT_SITUATION = "RULE_DOES_NOT_FIT_SITUATION", "Automated rule does not represent the professional situation"
         EVIDENCE_RECEIVED_LATE = "EVIDENCE_RECEIVED_LATE", "Additional evidence received after calculation"
         SYSTEM_DEFECT = "SYSTEM_DEFECT", "System/calculation defect"
-        OTHER = "OTHER", "Other (see rationale)"
+        OTHER = "OTHER", "Other"
 
-    # --- target being overridden -----------------------------------
-    content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.PROTECT,
-        related_name="calculated_field_overrides",
-        help_text="Target model holding the calculated field (e.g. "
-        "competency.ProfessionalScope, professionals.ProfessionalProfile, "
-        "professionals.CredentialRecord).",
-    )
-    object_id = models.PositiveBigIntegerField(help_text="Target row identifier.")
-    target = GenericForeignKey("content_type", "object_id")
-    field_name = models.CharField(
-        max_length=80,
-        help_text="Exact field name on the target model holding the "
-        "current deciding value, e.g. 'current_qualion_level', "
-        "'is_deployable', 'headline'.",
-    )
-    calculation_field_code = models.CharField(
-        max_length=40,
-        choices=CalculatedFieldCode.choices,
+    batch_id = models.UUIDField(
+        null=True,
+        blank=True,
         db_index=True,
-        help_text="Which of the 15 system-calculated fields this is, "
-        "independent of the target model/field_name.",
+        help_text="Most recent admin submission batch that updated this override.",
     )
 
-    # --- professional context (denormalised for fast queries) -------
     professional = models.ForeignKey(
         "professionals.ProfessionalProfile",
         on_delete=models.CASCADE,
         related_name="calculated_field_overrides",
         db_index=True,
-        help_text="Professional the calculated field belongs to.",
     )
 
-    # --- the request -------------------------------------------------
+    professional_scope = models.ForeignKey(
+        "competency.ProfessionalScope",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="calculated_field_overrides",
+        db_index=True,
+    )
+
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        related_name="calculated_field_overrides",
+    )
+
+    object_id = models.PositiveBigIntegerField()
+
+    target = GenericForeignKey(
+        "content_type",
+        "object_id",
+    )
+
+    field_name = models.CharField(
+        max_length=150,
+    )
+
+    calculation_field_code = models.CharField(
+        max_length=50,
+        choices=CalculatedFieldCode.choices,
+        db_index=True,
+    )
+
     request_type = models.CharField(
         max_length=30,
         choices=RequestType.choices,
-        help_text="Correction (source data was wrong) or Exceptional "
-        "Override (source data is right, rule doesn't fit).",
+        default=RequestType.CORRECTION,
     )
+
+    # Original system value before any admin override.
+    # Preserve this once the override row is first created.
     system_calculated_value = models.JSONField(
-        help_text="Original system output at the time of the request. "
-        "Immutable snapshot; never overwritten even after approval.",
+        null=True,
+        blank=True,
     )
+
     system_calculated_at = models.DateTimeField(
-        help_text="When the system produced system_calculated_value."
+        null=True,
+        blank=True,
     )
+
     system_ruleset_version = models.CharField(
-        max_length=30, blank=True, help_text="Calculation ruleset/version used."
+        max_length=30,
+        blank=True,
+        default="",
     )
+
+    # Latest admin-proposed value.
     proposed_value = models.JSONField(
-        help_text="Value the requester/reviewer is proposing instead."
+        null=True,
+        blank=True,
     )
+
+    # Latest reason.
     override_reason_code = models.CharField(
         max_length=40,
         choices=OverrideReasonCode.choices,
-        help_text="Controlled reason category for the proposed change.",
     )
+
     rationale = models.TextField(
         max_length=3000,
-        help_text="Detailed justification for the proposed value. Always required.",
     )
+
     evidence = models.ForeignKey(
         "evidence.EvidenceDocument",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="calculated_field_overrides",
-        help_text="Supporting evidence/document reference. Required for "
-        "EXCEPTIONAL_OVERRIDE; recommended for CORRECTION.",
     )
+
     requested_by = models.ForeignKey(
         "accounts.UserTbl",
         on_delete=models.PROTECT,
         related_name="calculated_field_overrides_requested",
-        help_text="User who raised the request; may be the professional "
-        "themselves (request only, never self-approve) or a reviewer.",
     )
-    requested_at = models.DateTimeField(help_text="Request submission timestamp.")
 
-    # --- reviewer recommendation (mentor / technical reviewer) -------
+    requested_at = models.DateTimeField()
+
     reviewed_by = models.ForeignKey(
         "accounts.UserTbl",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="calculated_field_overrides_reviewed",
-        help_text="Mentor/technical reviewer who assessed the request; "
-        "cannot equal requested_by for reviewer-required fields; cannot "
-        "equal the professional.",
-    )
-    review_notes = models.TextField(
-        max_length=3000, blank=True, help_text="Reviewer's assessment notes."
-    )
-    reviewed_at = models.DateTimeField(
-        null=True, blank=True, help_text="Required once decision leaves PENDING."
     )
 
-    # --- final decision (authorised decision-maker / validator) ------
+    review_notes = models.TextField(
+        max_length=3000,
+        blank=True,
+    )
+
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     decision = models.CharField(
         max_length=20,
         choices=Decision.choices,
         default=Decision.PENDING,
         db_index=True,
-        help_text="Current workflow state of this override request.",
     )
+
+    # Latest/current approved admin value.
     final_approved_value = models.JSONField(
         null=True,
         blank=True,
-        help_text="Value confirmed by the approver; required when decision=APPROVED. "
-        "This becomes the new current deciding value on the target field "
-        "and is also written to CalculatedFieldValueHistory.",
     )
+
     approved_by = models.ForeignKey(
         "accounts.UserTbl",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="calculated_field_overrides_approved",
-        help_text="Authorised Competency Decision-Maker/Validator; cannot "
-        "equal requested_by; cannot equal the professional; separation of "
-        "duties enforced at the service layer per role/permission, not "
-        "merely administrative access.",
     )
+
     decision_reason = models.TextField(
         max_length=3000,
         blank=True,
-        help_text="Required for REJECTED; recommended for all non-PENDING decisions.",
-    )
-    approved_at = models.DateTimeField(
-        null=True, blank=True, help_text="Required when decision is APPROVED or REJECTED."
-    )
-    four_eyes_required = models.BooleanField(
-        default=False,
-        help_text="Set true for L4/L5 and other high-impact outcomes per "
-        "QUALION_QP-10; reviewed_by and approved_by must then be different "
-        "authorised individuals.",
     )
 
-    # --- effective window ---------------------------------------------
-    effective_from = models.DateField(
-        null=True, blank=True, help_text="Date the final_approved_value takes effect."
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
     )
+
+    four_eyes_required = models.BooleanField(
+        default=False,
+    )
+
+    effective_from = models.DateField(
+        null=True,
+        blank=True,
+    )
+
     review_due_date = models.DateField(
         null=True,
         blank=True,
-        help_text="Optional re-review/expiry date, mainly for time-bound "
-        "EXCEPTIONAL_OVERRIDE decisions.",
-    )
-
-    # --- version chain --------------------------------------------------
-    supersedes = models.ForeignKey(
-        "self",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="superseded_by",
-        help_text="Prior override request for the same target+field that "
-        "this one replaces or re-opens, preserving full request history.",
     )
 
     class Meta:
         db_table = "governance_calculated_field_override"
-        verbose_name = "CalculatedFieldOverride"
-        verbose_name_plural = "CalculatedFieldOverride"
-        ordering = ["-created_at"]
+        ordering = ["-updated_at"]
+
         indexes = [
-            models.Index(fields=["content_type", "object_id", "field_name"]),
             models.Index(fields=["professional", "calculation_field_code"]),
+            models.Index(fields=["professional_scope", "calculation_field_code"]),
+            models.Index(fields=["content_type", "object_id"]),
+            models.Index(fields=["batch_id"]),
         ]
+
         constraints = [
-            models.CheckConstraint(
-                check=~Q(requested_by=F("approved_by")),
-                name="chk_calc_override_requester_not_approver",
+            models.UniqueConstraint(
+                fields=[
+                    "professional",
+                    "calculation_field_code",
+                    "content_type",
+                    "object_id",
+                ],
+                name="uq_current_calculated_field_override",
             ),
             models.CheckConstraint(
                 check=(~Q(decision="APPROVED") | Q(final_approved_value__isnull=False)),
@@ -370,123 +382,136 @@ class CalculatedFieldOverride(UUIDModel, TenantOwnedModel, CreatedOnlyModel):
                 check=(~Q(decision="APPROVED") | Q(approved_by__isnull=False)),
                 name="chk_calc_override_approver_required_on_approval",
             ),
-            models.CheckConstraint(
-                check=(~Q(decision="REJECTED") | ~Q(decision_reason="")),
-                name="chk_calc_override_decision_reason_required_on_rejection",
-            ),
-            models.CheckConstraint(
-                check=(~Q(decision__in=["APPROVED", "REJECTED"]) | Q(approved_at__isnull=False)),
-                name="chk_calc_override_approved_at_required",
-            ),
-            models.CheckConstraint(
-                check=(~Q(request_type="EXCEPTIONAL_OVERRIDE") | Q(evidence__isnull=False)),
-                name="chk_calc_override_evidence_required_for_exception",
-            ),
         ]
 
     def __str__(self):
-        return f"{self.professional} — {self.calculation_field_code} ({self.decision})"
+        return f"{self.professional} - {self.calculation_field_code} ({self.decision})"
 
 
 class CalculatedFieldValueHistory(TenantOwnedModel, CreatedOnlyModel):
-    """Append-only ledger of every change to the CURRENT deciding value
-    of a system-calculated field, regardless of whether the change came
-    from a routine system recalculation or an approved override.
+    """
+    Append-only history.
 
-    Key rules: Never updated or deleted after creation. One row per
-    change. Reconstructing "what was this value as of date X" is a
-    simple query against this table; the main/related table (e.g.
-    ProfessionalScope) always holds only the latest/current value.
+    A new row is created every time the actual calculated field value changes.
     """
 
     class ChangeSource(models.TextChoices):
         SYSTEM_RECALCULATION = "SYSTEM_RECALCULATION", "System recalculation"
-        CORRECTION_RECALCULATION = (
-            "CORRECTION_RECALCULATION",
-            "Recalculated after source-record correction",
-        )
-        OVERRIDE_APPROVED = "OVERRIDE_APPROVED", "Exceptional override approved"
+        CORRECTION_RECALCULATION = "CORRECTION_RECALCULATION", "Correction recalculation"
+        OVERRIDE_APPROVED = "OVERRIDE_APPROVED", "Override approved"
 
-    content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.PROTECT,
-        related_name="calculated_field_value_history",
-        help_text="Target model holding the calculated field.",
-    )
-    object_id = models.PositiveBigIntegerField(help_text="Target row identifier.")
-    target = GenericForeignKey("content_type", "object_id")
-    field_name = models.CharField(
-        max_length=80, help_text="Exact field name on the target model."
-    )
-    calculation_field_code = models.CharField(
-        max_length=40,
-        choices=CalculatedFieldCode.choices,
+    batch_id = models.UUIDField(
+        null=True,
+        blank=True,
         db_index=True,
-        help_text="Which of the 15 system-calculated fields this change belongs to.",
     )
+
     professional = models.ForeignKey(
         "professionals.ProfessionalProfile",
         on_delete=models.CASCADE,
         related_name="calculated_field_value_history",
         db_index=True,
-        help_text="Professional the calculated field belongs to.",
     )
+
+    professional_scope = models.ForeignKey(
+        "competency.ProfessionalScope",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="calculated_field_value_history",
+        db_index=True,
+    )
+
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        related_name="calculated_field_value_history",
+    )
+
+    object_id = models.PositiveBigIntegerField()
+
+    target = GenericForeignKey(
+        "content_type",
+        "object_id",
+    )
+
+    field_name = models.CharField(
+        max_length=150,
+    )
+
+    calculation_field_code = models.CharField(
+        max_length=50,
+        choices=CalculatedFieldCode.choices,
+        db_index=True,
+    )
+
     previous_value = models.JSONField(
-        null=True, blank=True, help_text="Value immediately before this change; NULL for the first record."
+        null=True,
+        blank=True,
     )
-    new_value = models.JSONField(help_text="Value immediately after this change (the new current value).")
+
+    new_value = models.JSONField()
+
+    # Store the reason AT THAT POINT IN TIME.
+    reason_code = models.CharField(
+        max_length=40,
+        choices=CalculatedFieldOverride.OverrideReasonCode.choices,
+        blank=True,
+        default="",
+    )
+
+    reason = models.TextField(
+        max_length=3000,
+        blank=True,
+        default="",
+    )
+
     change_source = models.CharField(
         max_length=30,
         choices=ChangeSource.choices,
         db_index=True,
-        help_text="Why the value changed.",
     )
+
     override = models.ForeignKey(
         CalculatedFieldOverride,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="value_history_entries",
-        help_text="Required when change_source=OVERRIDE_APPROVED; links "
-        "the value change back to its full request/approval trail.",
     )
+
     changed_by = models.ForeignKey(
         "accounts.UserTbl",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="calculated_field_value_changes",
-        help_text="NULL for system-triggered recalculations; set for "
-        "override-driven changes (normally the approver).",
     )
+
     effective_from = models.DateField(
-        null=True, blank=True, help_text="Date the new_value takes/took effect."
+        null=True,
+        blank=True,
     )
+
     recalculation_ruleset_version = models.CharField(
         max_length=30,
         blank=True,
-        help_text="Ruleset/version used, for SYSTEM_RECALCULATION/CORRECTION_RECALCULATION rows.",
+        default="",
     )
 
     class Meta:
         db_table = "governance_calculated_field_value_history"
-        verbose_name = "CalculatedFieldValueHistory"
-        verbose_name_plural = "CalculatedFieldValueHistory"
         ordering = ["-created_at"]
+
         indexes = [
-            models.Index(fields=["content_type", "object_id", "field_name", "-created_at"]),
             models.Index(fields=["professional", "calculation_field_code", "-created_at"]),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                check=(~Q(change_source="OVERRIDE_APPROVED") | Q(override__isnull=False)),
-                name="chk_calc_value_history_override_required",
-            ),
+            models.Index(fields=["professional_scope", "calculation_field_code", "-created_at"]),
+            models.Index(fields=["content_type", "object_id", "field_name", "-created_at"]),
+            models.Index(fields=["batch_id"]),
         ]
 
     def __str__(self):
-        return f"{self.professional} — {self.calculation_field_code} @ {self.created_at}"
-    
+        return f"{self.professional} - {self.calculation_field_code} @ {self.created_at}"
 
 
 

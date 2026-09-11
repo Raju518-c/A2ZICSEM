@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from drf_spectacular.utils import extend_schema, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -21,6 +21,34 @@ from experience.models import *
 from competency.models import *
 from catalog.models import *
 from .governance_calculation_engine import *
+import uuid
+from datetime import date, datetime
+
+
+from django.contrib.contenttypes.models import ContentType
+from django.db import models, transaction
+
+from rest_framework import serializers, status
+
+from accounts.models import UserTbl
+from competency.models import ProfessionalScope
+from evidence.models import EvidenceDocument
+from experience.models import ProjectRecord
+from professionals.models import (
+    CredentialRecord,
+    ProfessionalProfile,
+    ProfessionalReview,
+)
+
+from governance.models import (
+    CalculatedFieldCode,
+    CalculatedFieldOverride,
+    CalculatedFieldValueHistory,
+)
+
+from governance.serializers import CalculatedFieldAdminVerificationSerializer
+
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class AuditEventListCreateAPIView(APIView):
@@ -858,6 +886,1965 @@ class CalculateSystemFieldAPIView(APIView):
 #    the same call, writes the field + logs history immediately
 # ============================================================
 
+
+
+
+
+
+
+# =============================================================================
+# CALCULATED FIELD → ACTUAL MODEL FIELD MAPPING
+# =============================================================================
+
+SCOPE_FIELD_MAP = {
+    CalculatedFieldCode.CALENDAR_EXPERIENCE: "calendar_experience_months",
+    CalculatedFieldCode.VERIFIED_FIELD_DAYS: "verified_field_days",
+    CalculatedFieldCode.VERIFIED_PROJECT_COUNT: "verified_project_count",
+    CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED: "highest_authority_reached",
+    CalculatedFieldCode.QUALION_LEVEL: "current_qualion_level",
+    CalculatedFieldCode.DEPLOYABILITY_FLAG: "is_deployable",
+}
+
+
+PROFILE_FIELD_MAP = {
+    CalculatedFieldCode.PROFESSIONAL_HEADLINE: "headline",
+    CalculatedFieldCode.PRIMARY_ROLE: "primary_role",
+    CalculatedFieldCode.ADDITIONAL_ROLES: "additional_roles",
+    CalculatedFieldCode.INDUSTRIES_SERVED: "industries_served",
+    CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE: "total_career_experience_months",
+}
+
+
+# =============================================================================
+# JSON SAFE VALUE
+# =============================================================================
+
+def json_safe_value(value):
+    """
+    Converts DB/model values into values safe to store inside JSONField.
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, models.Model):
+        return {
+            "id": value.pk,
+            "display": str(value),
+        }
+
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+
+    if isinstance(value, uuid.UUID):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {
+            key: json_safe_value(val)
+            for key, val in value.items()
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [
+            json_safe_value(item)
+            for item in value
+        ]
+
+    return value
+
+
+# =============================================================================
+# READ CURRENT FIELD VALUE
+# =============================================================================
+
+def get_field_snapshot(instance, field_name):
+    """
+    Reads the current value before admin override.
+
+    Supports:
+    - normal fields
+    - ForeignKey
+    - ManyToMany
+    """
+
+    field = instance._meta.get_field(field_name)
+
+    if field.many_to_many:
+        return [
+            json_safe_value(obj)
+            for obj in getattr(instance, field_name).all()
+        ]
+
+    value = getattr(instance, field_name)
+
+    return json_safe_value(value)
+
+
+# =============================================================================
+# RESOLVE FOREIGN KEY
+# =============================================================================
+
+def resolve_related_object(field, incoming_value):
+    """
+    Allows FK payload like:
+
+        "value": 7
+
+    or:
+
+        "value": {
+            "id": 7
+        }
+
+    or:
+
+        "value": {
+            "code": "L2"
+        }
+    """
+
+    if incoming_value is None:
+        return None
+
+    related_model = field.related_model
+
+    if isinstance(incoming_value, dict):
+
+        related_id = incoming_value.get("id")
+
+        if related_id is not None:
+            try:
+                return related_model.objects.get(
+                    pk=related_id
+                )
+            except related_model.DoesNotExist:
+                raise serializers.ValidationError({
+                    "value": (
+                        f"{related_model.__name__} "
+                        f"with id={related_id} not found."
+                    )
+                })
+
+        code = incoming_value.get("code")
+
+        if code:
+            try:
+                return related_model.objects.get(
+                    code=code
+                )
+            except related_model.DoesNotExist:
+                raise serializers.ValidationError({
+                    "value": (
+                        f"{related_model.__name__} "
+                        f"with code={code} not found."
+                    )
+                })
+
+        raise serializers.ValidationError({
+            "value": (
+                "Related field value must contain "
+                "'id' or 'code'."
+            )
+        })
+
+    try:
+        return related_model.objects.get(
+            pk=incoming_value
+        )
+    except related_model.DoesNotExist:
+        raise serializers.ValidationError({
+            "value": (
+                f"{related_model.__name__} "
+                f"with id={incoming_value} not found."
+            )
+        })
+
+
+# =============================================================================
+# RESOLVE MANY TO MANY
+# =============================================================================
+
+def resolve_many_to_many_values(field, incoming_value):
+    if incoming_value is None:
+        return []
+
+    if not isinstance(incoming_value, list):
+        raise serializers.ValidationError({
+            "value": f"{field.name} expects a list."
+        })
+
+    result = []
+
+    for item in incoming_value:
+        result.append(
+            resolve_related_object(
+                field,
+                item,
+            )
+        )
+
+    return result
+
+
+# =============================================================================
+# RESOLVE NORMAL FIELD
+# =============================================================================
+
+def resolve_normal_field_value(field, incoming_value):
+    if incoming_value is None:
+        return None
+
+    try:
+        resolved_value = field.to_python(
+            incoming_value
+        )
+    except Exception as exc:
+        raise serializers.ValidationError({
+            "value": (
+                f"Invalid value for {field.name}: "
+                f"{str(exc)}"
+            )
+        })
+
+    if field.choices:
+        allowed_values = [
+            choice[0]
+            for choice in field.choices
+        ]
+
+        if resolved_value not in allowed_values:
+            raise serializers.ValidationError({
+                "value": (
+                    f"Invalid value '{resolved_value}' "
+                    f"for {field.name}. "
+                    f"Allowed values: {allowed_values}"
+                )
+            })
+
+    return resolved_value
+
+
+# =============================================================================
+# RESOLVE ANY MODEL FIELD VALUE
+# =============================================================================
+
+def resolve_new_field_value(instance, field_name, incoming_value):
+    field = instance._meta.get_field(field_name)
+
+    if field.many_to_many:
+        return resolve_many_to_many_values(
+            field,
+            incoming_value,
+        )
+
+    if field.is_relation:
+        return resolve_related_object(
+            field,
+            incoming_value,
+        )
+
+    return resolve_normal_field_value(
+        field,
+        incoming_value,
+    )
+
+
+# =============================================================================
+# CONVERT RESOLVED VALUE FOR HISTORY / OVERRIDE JSON
+# =============================================================================
+
+def resolved_value_to_json(resolved_value):
+    if isinstance(resolved_value, list):
+        return [
+            json_safe_value(item)
+            for item in resolved_value
+        ]
+
+    return json_safe_value(
+        resolved_value
+    )
+
+
+# =============================================================================
+# APPLY ACTUAL FIELD VALUE
+# =============================================================================
+
+def apply_field_value(instance, field_name, resolved_value):
+    """
+    Updates actual corresponding table record.
+    """
+
+    field = instance._meta.get_field(field_name)
+
+    if field.many_to_many:
+        getattr(instance, field_name).set(
+            resolved_value
+        )
+        return
+
+    setattr(
+        instance,
+        field_name,
+        resolved_value,
+    )
+
+    instance.save(
+        update_fields=[field_name]
+    )
+
+
+# =============================================================================
+# VALIDATE OVERRIDE REASON
+# =============================================================================
+
+def require_override_reason(item):
+    """
+    Reason is required only if actual value is being changed.
+    """
+
+    reason_code = item.get("reason_code")
+    reason = item.get("reason", "").strip()
+
+    if not reason_code:
+        raise serializers.ValidationError({
+            "reason_code": (
+                f"reason_code is required because "
+                f"{item['calculation_field_code']} "
+                f"is being changed."
+            )
+        })
+
+    if not reason:
+        raise serializers.ValidationError({
+            "reason": (
+                f"reason is required because "
+                f"{item['calculation_field_code']} "
+                f"is being changed."
+            )
+        })
+
+    return reason_code, reason
+
+
+# =============================================================================
+# GET EVIDENCE
+# =============================================================================
+
+def get_evidence(item):
+    evidence_id = item.get("evidence_id")
+
+    if not evidence_id:
+        return None
+
+    try:
+        return EvidenceDocument.objects.get(
+            pk=evidence_id
+        )
+    except EvidenceDocument.DoesNotExist:
+        raise serializers.ValidationError({
+            "evidence_id": (
+                f"EvidenceDocument {evidence_id} "
+                f"not found."
+            )
+        })
+
+
+# =============================================================================
+# CREATE OR UPDATE CURRENT OVERRIDE + ALWAYS CREATE HISTORY
+# =============================================================================
+
+def create_or_update_override_and_history(
+    *,
+    batch_id,
+    professional,
+    professional_scope,
+    target_instance,
+    field_name,
+    calculation_field_code,
+    previous_value,
+    new_value,
+    item,
+    updated_by,
+    ruleset_version,
+):
+    """
+    CalculatedFieldOverride:
+        One current/latest record per:
+            professional
+            + calculation_field_code
+            + target model
+            + target object
+
+        First override:
+            CREATE
+
+        Future override of same field:
+            UPDATE SAME ROW
+
+    CalculatedFieldValueHistory:
+        ALWAYS CREATE A NEW ROW.
+
+    Example:
+
+        first:
+            250 -> 300
+
+        second:
+            300 -> 350
+
+    Override:
+        one row, latest value = 350
+
+    History:
+        row1 = 250 -> 300
+        row2 = 300 -> 350
+    """
+
+    now = timezone.now()
+
+    reason_code, reason = require_override_reason(
+        item
+    )
+
+    evidence = get_evidence(
+        item
+    )
+
+    content_type = ContentType.objects.get_for_model(
+        target_instance.__class__
+    )
+
+    # -------------------------------------------------------------------------
+    # Search existing CURRENT override record.
+    # -------------------------------------------------------------------------
+
+    override = CalculatedFieldOverride.objects.select_for_update().filter(
+        professional=professional,
+        calculation_field_code=calculation_field_code,
+        content_type=content_type,
+        object_id=target_instance.pk,
+    ).first()
+
+    # -------------------------------------------------------------------------
+    # EXISTING OVERRIDE → UPDATE SAME ROW
+    # -------------------------------------------------------------------------
+
+    if override:
+
+        override.batch_id = batch_id
+
+        override.professional_scope = professional_scope
+
+        override.field_name = field_name
+
+        # IMPORTANT:
+        #
+        # Do NOT update:
+        #
+        # override.system_calculated_value
+        #
+        # It remains the ORIGINAL system value before
+        # the first admin override.
+
+        override.proposed_value = new_value
+
+        override.override_reason_code = reason_code
+
+        override.rationale = reason
+
+        override.evidence = evidence
+
+        override.request_type = (
+            CalculatedFieldOverride.RequestType.CORRECTION
+        )
+
+        override.requested_by = updated_by
+
+        override.requested_at = now
+
+        override.reviewed_by = updated_by
+
+        override.review_notes = reason
+
+        override.reviewed_at = now
+
+        override.decision = (
+            CalculatedFieldOverride.Decision.APPROVED
+        )
+
+        override.final_approved_value = new_value
+
+        override.approved_by = updated_by
+
+        override.decision_reason = reason
+
+        override.approved_at = now
+
+        override.effective_from = now.date()
+
+        if ruleset_version:
+            override.system_ruleset_version = (
+                ruleset_version
+            )
+
+        override.save()
+
+        override_action = "UPDATED"
+
+    # -------------------------------------------------------------------------
+    # FIRST OVERRIDE → CREATE NEW CURRENT OVERRIDE ROW
+    # -------------------------------------------------------------------------
+
+    else:
+
+        override = CalculatedFieldOverride.objects.create(
+            tenant=professional.tenant,
+
+            batch_id=batch_id,
+
+            professional=professional,
+
+            professional_scope=professional_scope,
+
+            content_type=content_type,
+
+            object_id=target_instance.pk,
+
+            field_name=field_name,
+
+            calculation_field_code=calculation_field_code,
+
+            request_type=(
+                CalculatedFieldOverride.RequestType.CORRECTION
+            ),
+
+            # Original system/current value before first override.
+            system_calculated_value=previous_value,
+
+            system_calculated_at=now,
+
+            system_ruleset_version=ruleset_version,
+
+            proposed_value=new_value,
+
+            override_reason_code=reason_code,
+
+            rationale=reason,
+
+            evidence=evidence,
+
+            requested_by=updated_by,
+
+            requested_at=now,
+
+            reviewed_by=updated_by,
+
+            review_notes=reason,
+
+            reviewed_at=now,
+
+            decision=(
+                CalculatedFieldOverride.Decision.APPROVED
+            ),
+
+            final_approved_value=new_value,
+
+            approved_by=updated_by,
+
+            decision_reason=reason,
+
+            approved_at=now,
+
+            effective_from=now.date(),
+        )
+
+        override_action = "CREATED"
+
+    # -------------------------------------------------------------------------
+    # HISTORY → ALWAYS CREATE NEW ROW
+    # -------------------------------------------------------------------------
+
+    history = CalculatedFieldValueHistory.objects.create(
+        tenant=professional.tenant,
+
+        batch_id=batch_id,
+
+        professional=professional,
+
+        professional_scope=professional_scope,
+
+        content_type=content_type,
+
+        object_id=target_instance.pk,
+
+        field_name=field_name,
+
+        calculation_field_code=calculation_field_code,
+
+        # Immediate value before this particular update.
+        previous_value=previous_value,
+
+        new_value=new_value,
+
+        reason_code=reason_code,
+
+        reason=reason,
+
+        change_source=(
+            CalculatedFieldValueHistory.ChangeSource.OVERRIDE_APPROVED
+        ),
+
+        override=override,
+
+        changed_by=updated_by,
+
+        effective_from=now.date(),
+
+        recalculation_ruleset_version=ruleset_version,
+    )
+
+    return override, history, override_action
+
+
+# =============================================================================
+# PROFESSIONAL SCOPE CALCULATED FIELDS
+# =============================================================================
+
+def process_scope_field(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    code = item["calculation_field_code"]
+
+    professional_scope_id = item.get(
+        "professional_scope_id"
+    )
+
+    try:
+        professional_scope = (
+            ProfessionalScope.objects
+            .select_for_update()
+            .get(
+                pk=professional_scope_id,
+                professional=professional,
+            )
+        )
+
+    except ProfessionalScope.DoesNotExist:
+        raise serializers.ValidationError({
+            "professional_scope_id": (
+                f"ProfessionalScope "
+                f"{professional_scope_id} "
+                f"does not belong to professional "
+                f"{professional.pk}."
+            )
+        })
+
+    field_name = SCOPE_FIELD_MAP[
+        code
+    ]
+
+    # CURRENT actual value before admin update.
+    previous_value = get_field_snapshot(
+        professional_scope,
+        field_name,
+    )
+
+    try:
+        resolved_value = resolve_new_field_value(
+            professional_scope,
+            field_name,
+            item["value"],
+        )
+
+    except serializers.ValidationError:
+        raise
+
+    except Exception as exc:
+        raise serializers.ValidationError({
+            "value": (
+                f"Unable to resolve "
+                f"{code}: {str(exc)}"
+            )
+        })
+
+    new_value = resolved_value_to_json(
+        resolved_value
+    )
+
+    # No actual change.
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": code,
+            "professional_scope_id": professional_scope.pk,
+            "target_model": "ProfessionalScope",
+            "target_id": professional_scope.pk,
+            "field_name": field_name,
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    # Create/update override and create history BEFORE
+    # changing actual target record.
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=professional_scope,
+            target_instance=professional_scope,
+            field_name=field_name,
+            calculation_field_code=code,
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    # Update actual ProfessionalScope field.
+    apply_field_value(
+        professional_scope,
+        field_name,
+        resolved_value,
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": code,
+        "professional_scope_id": professional_scope.pk,
+        "target_model": "ProfessionalScope",
+        "target_id": professional_scope.pk,
+        "field_name": field_name,
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# PROFESSIONAL PROFILE CALCULATED FIELDS
+# =============================================================================
+
+def process_profile_field(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    code = item["calculation_field_code"]
+
+    profile = (
+        ProfessionalProfile.objects
+        .select_for_update()
+        .get(
+            pk=professional.pk
+        )
+    )
+
+    field_name = PROFILE_FIELD_MAP[
+        code
+    ]
+
+    previous_value = get_field_snapshot(
+        profile,
+        field_name,
+    )
+
+    try:
+        resolved_value = resolve_new_field_value(
+            profile,
+            field_name,
+            item["value"],
+        )
+
+    except serializers.ValidationError:
+        raise
+
+    except Exception as exc:
+        raise serializers.ValidationError({
+            "value": (
+                f"Unable to resolve "
+                f"{code}: {str(exc)}"
+            )
+        })
+
+    new_value = resolved_value_to_json(
+        resolved_value
+    )
+
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": code,
+            "target_model": "ProfessionalProfile",
+            "target_id": profile.pk,
+            "field_name": field_name,
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=profile,
+            field_name=field_name,
+            calculation_field_code=code,
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    apply_field_value(
+        profile,
+        field_name,
+        resolved_value,
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": code,
+        "target_model": "ProfessionalProfile",
+        "target_id": profile.pk,
+        "field_name": field_name,
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# PROFESSIONAL SUMMARY
+# ProfessionalProfile.summary
+# ProfessionalProfile.summary_source
+# =============================================================================
+
+def process_professional_summary(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    profile = (
+        ProfessionalProfile.objects
+        .select_for_update()
+        .get(
+            pk=professional.pk
+        )
+    )
+
+    incoming = item["value"]
+
+    previous_value = {
+        "summary": profile.summary,
+        "summary_source": profile.summary_source,
+    }
+
+    new_value = {
+        "summary": incoming.get(
+            "summary",
+            profile.summary,
+        ),
+
+        "summary_source": incoming.get(
+            "summary_source",
+            profile.summary_source,
+        ),
+    }
+
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": (
+                CalculatedFieldCode.PROFESSIONAL_SUMMARY
+            ),
+            "target_model": "ProfessionalProfile",
+            "target_id": profile.pk,
+            "field_name": "summary,summary_source",
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    # Validate summary_source if it has choices.
+    summary_source_field = (
+        profile._meta.get_field(
+            "summary_source"
+        )
+    )
+
+    if summary_source_field.choices:
+        allowed_values = [
+            choice[0]
+            for choice in summary_source_field.choices
+        ]
+
+        if new_value["summary_source"] not in allowed_values:
+            raise serializers.ValidationError({
+                "summary_source": (
+                    f"Invalid summary_source "
+                    f"'{new_value['summary_source']}'. "
+                    f"Allowed values: {allowed_values}"
+                )
+            })
+
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=profile,
+            field_name="summary,summary_source",
+            calculation_field_code=(
+                CalculatedFieldCode.PROFESSIONAL_SUMMARY
+            ),
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    profile.summary = new_value[
+        "summary"
+    ]
+
+    profile.summary_source = new_value[
+        "summary_source"
+    ]
+
+    profile.save(
+        update_fields=[
+            "summary",
+            "summary_source",
+        ]
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": (
+            CalculatedFieldCode.PROFESSIONAL_SUMMARY
+        ),
+        "target_model": "ProfessionalProfile",
+        "target_id": profile.pk,
+        "field_name": "summary,summary_source",
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# PROJECT RESPONSIBILITY BULLETS
+# ProjectRecord.responsibilities
+# =============================================================================
+
+def process_project_responsibilities(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    project_record_id = item.get(
+        "project_record_id"
+    )
+
+    try:
+        project = (
+            ProjectRecord.objects
+            .select_for_update()
+            .get(
+                pk=project_record_id,
+                professional=professional,
+            )
+        )
+
+    except ProjectRecord.DoesNotExist:
+        raise serializers.ValidationError({
+            "project_record_id": (
+                f"ProjectRecord "
+                f"{project_record_id} "
+                f"does not belong to professional "
+                f"{professional.pk}."
+            )
+        })
+
+    field_name = "responsibilities"
+
+    previous_value = json_safe_value(
+        project.responsibilities
+    )
+
+    field = project._meta.get_field(
+        field_name
+    )
+
+    resolved_value = resolve_normal_field_value(
+        field,
+        item["value"],
+    )
+
+    new_value = json_safe_value(
+        resolved_value
+    )
+
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": (
+                CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS
+            ),
+            "project_record_id": project.pk,
+            "target_model": "ProjectRecord",
+            "target_id": project.pk,
+            "field_name": field_name,
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=project,
+            field_name=field_name,
+            calculation_field_code=(
+                CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS
+            ),
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    project.responsibilities = resolved_value
+
+    project.save(
+        update_fields=[
+            "responsibilities"
+        ]
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": (
+            CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS
+        ),
+        "project_record_id": project.pk,
+        "target_model": "ProjectRecord",
+        "target_id": project.pk,
+        "field_name": field_name,
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# CREDENTIAL STATUS
+# CredentialRecord.status
+# =============================================================================
+
+def process_credential_status(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    credential_record_id = item.get(
+        "credential_record_id"
+    )
+
+    try:
+        credential = (
+            CredentialRecord.objects
+            .select_for_update()
+            .get(
+                pk=credential_record_id,
+                professional=professional,
+            )
+        )
+
+    except CredentialRecord.DoesNotExist:
+        raise serializers.ValidationError({
+            "credential_record_id": (
+                f"CredentialRecord "
+                f"{credential_record_id} "
+                f"does not belong to professional "
+                f"{professional.pk}."
+            )
+        })
+
+    field_name = "status"
+
+    previous_value = json_safe_value(
+        credential.status
+    )
+
+    field = credential._meta.get_field(
+        field_name
+    )
+
+    resolved_value = resolve_normal_field_value(
+        field,
+        item["value"],
+    )
+
+    new_value = json_safe_value(
+        resolved_value
+    )
+
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": (
+                CalculatedFieldCode.CREDENTIAL_STATUS
+            ),
+            "credential_record_id": credential.pk,
+            "target_model": "CredentialRecord",
+            "target_id": credential.pk,
+            "field_name": field_name,
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=credential,
+            field_name=field_name,
+            calculation_field_code=(
+                CalculatedFieldCode.CREDENTIAL_STATUS
+            ),
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    credential.status = resolved_value
+
+    credential.save(
+        update_fields=[
+            "status"
+        ]
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": (
+            CalculatedFieldCode.CREDENTIAL_STATUS
+        ),
+        "credential_record_id": credential.pk,
+        "target_model": "CredentialRecord",
+        "target_id": credential.pk,
+        "field_name": field_name,
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# CANDIDATE / MENTOR CLASSIFICATION
+#
+# ProfessionalProfile:
+#   current_classification
+#   classification_status
+#
+# ProfessionalReview:
+#   system_recommendation
+#   decision
+#   final_classification
+# =============================================================================
+
+def process_candidate_mentor_classification(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    professional_review_id = item.get(
+        "professional_review_id"
+    )
+
+    incoming = item["value"]
+
+    if not isinstance(incoming, dict):
+        raise serializers.ValidationError({
+            "value": (
+                "CANDIDATE_MENTOR_CLASSIFICATION "
+                "value must be an object."
+            )
+        })
+
+    profile = (
+        ProfessionalProfile.objects
+        .select_for_update()
+        .get(
+            pk=professional.pk
+        )
+    )
+
+    try:
+        review = (
+            ProfessionalReview.objects
+            .select_for_update()
+            .get(
+                pk=professional_review_id,
+                professional=professional,
+            )
+        )
+
+    except ProfessionalReview.DoesNotExist:
+        raise serializers.ValidationError({
+            "professional_review_id": (
+                f"ProfessionalReview "
+                f"{professional_review_id} "
+                f"does not belong to professional "
+                f"{professional.pk}."
+            )
+        })
+
+    previous_value = {
+        "current_classification": (
+            json_safe_value(
+                profile.current_classification
+            )
+        ),
+        "classification_status": (
+            json_safe_value(
+                profile.classification_status
+            )
+        ),
+        "system_recommendation": (
+            json_safe_value(
+                review.system_recommendation
+            )
+        ),
+        "decision": (
+            json_safe_value(
+                review.decision
+            )
+        ),
+        "final_classification": (
+            json_safe_value(
+                review.final_classification
+            )
+        ),
+    }
+
+    # -------------------------------------------------------------------------
+    # Resolve each incoming field only if provided.
+    # -------------------------------------------------------------------------
+
+    if "current_classification" in incoming:
+        current_classification = (
+            resolve_new_field_value(
+                profile,
+                "current_classification",
+                incoming["current_classification"],
+            )
+        )
+    else:
+        current_classification = (
+            profile.current_classification
+        )
+
+    if "classification_status" in incoming:
+        classification_status = (
+            resolve_new_field_value(
+                profile,
+                "classification_status",
+                incoming["classification_status"],
+            )
+        )
+    else:
+        classification_status = (
+            profile.classification_status
+        )
+
+    if "system_recommendation" in incoming:
+        system_recommendation = (
+            resolve_new_field_value(
+                review,
+                "system_recommendation",
+                incoming["system_recommendation"],
+            )
+        )
+    else:
+        system_recommendation = (
+            review.system_recommendation
+        )
+
+    if "decision" in incoming:
+        decision = (
+            resolve_new_field_value(
+                review,
+                "decision",
+                incoming["decision"],
+            )
+        )
+    else:
+        decision = review.decision
+
+    if "final_classification" in incoming:
+        final_classification = (
+            resolve_new_field_value(
+                review,
+                "final_classification",
+                incoming["final_classification"],
+            )
+        )
+    else:
+        final_classification = (
+            review.final_classification
+        )
+
+    new_value = {
+        "current_classification": (
+            json_safe_value(
+                current_classification
+            )
+        ),
+        "classification_status": (
+            json_safe_value(
+                classification_status
+            )
+        ),
+        "system_recommendation": (
+            json_safe_value(
+                system_recommendation
+            )
+        ),
+        "decision": (
+            json_safe_value(
+                decision
+            )
+        ),
+        "final_classification": (
+            json_safe_value(
+                final_classification
+            )
+        ),
+    }
+
+    if previous_value == new_value:
+        return {
+            "status": "SKIPPED",
+            "calculation_field_code": (
+                CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
+            ),
+            "professional_review_id": review.pk,
+            "target_model": (
+                "ProfessionalProfile + ProfessionalReview"
+            ),
+            "previous_value": previous_value,
+            "new_value": new_value,
+            "message": "Value unchanged.",
+        }
+
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=profile,
+            field_name=(
+                "current_classification,"
+                "classification_status,"
+                "ProfessionalReview.system_recommendation,"
+                "ProfessionalReview.decision,"
+                "ProfessionalReview.final_classification"
+            ),
+            calculation_field_code=(
+                CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
+            ),
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Update ProfessionalProfile
+    # -------------------------------------------------------------------------
+
+    profile.current_classification = (
+        current_classification
+    )
+
+    profile.classification_status = (
+        classification_status
+    )
+
+    profile.save(
+        update_fields=[
+            "current_classification",
+            "classification_status",
+        ]
+    )
+
+    # -------------------------------------------------------------------------
+    # Update ProfessionalReview
+    # -------------------------------------------------------------------------
+
+    review.system_recommendation = (
+        system_recommendation
+    )
+
+    review.decision = decision
+
+    review.final_classification = (
+        final_classification
+    )
+
+    review.save(
+        update_fields=[
+            "system_recommendation",
+            "decision",
+            "final_classification",
+        ]
+    )
+
+    return {
+        "status": "UPDATED",
+        "calculation_field_code": (
+            CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
+        ),
+        "target_model": (
+            "ProfessionalProfile + ProfessionalReview"
+        ),
+        "target_id": profile.pk,
+        "professional_review_id": review.pk,
+        "previous_value": previous_value,
+        "new_value": new_value,
+        "override_id": str(override.pk),
+        "override_action": override_action,
+        "history_id": history.pk,
+    }
+
+
+# =============================================================================
+# MAIN CALCULATED FIELD ROUTER
+# =============================================================================
+
+def process_calculated_field(
+    *,
+    batch_id,
+    professional,
+    updated_by,
+    item,
+    ruleset_version,
+):
+    code = item[
+        "calculation_field_code"
+    ]
+
+    # -------------------------------------------------------------------------
+    # ProfessionalScope fields
+    # -------------------------------------------------------------------------
+
+    if code in SCOPE_FIELD_MAP:
+        return process_scope_field(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    # -------------------------------------------------------------------------
+    # ProfessionalProfile normal fields
+    # -------------------------------------------------------------------------
+
+    if code in PROFILE_FIELD_MAP:
+        return process_profile_field(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    # -------------------------------------------------------------------------
+    # Professional summary
+    # -------------------------------------------------------------------------
+
+    if code == CalculatedFieldCode.PROFESSIONAL_SUMMARY:
+        return process_professional_summary(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    # -------------------------------------------------------------------------
+    # Project responsibility
+    # -------------------------------------------------------------------------
+
+    if code == CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS:
+        return process_project_responsibilities(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    # -------------------------------------------------------------------------
+    # Credential status
+    # -------------------------------------------------------------------------
+
+    if code == CalculatedFieldCode.CREDENTIAL_STATUS:
+        return process_credential_status(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    # -------------------------------------------------------------------------
+    # Candidate / Mentor classification
+    # -------------------------------------------------------------------------
+
+    if code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
+        return process_candidate_mentor_classification(
+            batch_id=batch_id,
+            professional=professional,
+            updated_by=updated_by,
+            item=item,
+            ruleset_version=ruleset_version,
+        )
+
+    raise serializers.ValidationError({
+        "calculation_field_code": (
+            f"Unsupported calculated field code: "
+            f"{code}."
+        )
+    })
+
+
+# =============================================================================
+# SINGLE + BULK ADMIN VERIFICATION API
+# =============================================================================
+
+@method_decorator(
+    csrf_exempt,
+    name="dispatch",
+)
+class CalculatedFieldAdminVerificationAPIView(APIView):
+    """
+    Handles BOTH:
+
+    1 field:
+        fields = [ {...} ]
+
+    multiple fields:
+        fields = [ {...}, {...}, {...} ]
+
+    CalculatedFieldOverride:
+        CREATE first time
+        UPDATE same row next time
+
+    CalculatedFieldValueHistory:
+        ALWAYS CREATE NEW HISTORY ROW
+
+    Actual target table:
+        ALWAYS updated when value changes.
+    """
+
+    permission_classes = [
+        AllowAny
+    ]
+
+    @extend_schema(
+        request=CalculatedFieldAdminVerificationSerializer,
+
+        responses={
+            200: OpenApiResponse(
+                description=(
+                    "Calculated fields verified "
+                    "successfully."
+                )
+            ),
+            400: OpenApiResponse(
+                description=(
+                    "Invalid request or field update."
+                )
+            ),
+            404: OpenApiResponse(
+                description=(
+                    "Professional or admin user "
+                    "not found."
+                )
+            ),
+        },
+
+        examples=[
+            OpenApiExample(
+                "Bulk admin verification",
+                value={
+                    "professional_profile_id": 2,
+                    "updated_by": 25,
+                    "system_ruleset_version": "2026.1",
+                    "fields": [
+                        {
+                            "calculation_field_code": "CALENDAR_EXPERIENCE",
+                            "professional_scope_id": 10,
+                            "value": 15,
+                            "reason_code": "SOURCE_DATA_INCOMPLETE",
+                            "reason": (
+                                "Additional employment "
+                                "documents verified."
+                            ),
+                        },
+                        {
+                            "calculation_field_code": "VERIFIED_FIELD_DAYS",
+                            "professional_scope_id": 10,
+                            "value": "300.00",
+                            "reason_code": "SOURCE_DATA_INCOMPLETE",
+                            "reason": (
+                                "Additional site logs "
+                                "were verified."
+                            ),
+                        },
+                        {
+                            "calculation_field_code": "QUALION_LEVEL",
+                            "professional_scope_id": 10,
+                            "value": 7,
+                            "reason_code": "RULE_DOES_NOT_FIT_SITUATION",
+                            "reason": (
+                                "Admin verification supports "
+                                "the revised Qualion level."
+                            ),
+                        },
+                        {
+                            "calculation_field_code": "PROFESSIONAL_HEADLINE",
+                            "value": (
+                                "Bridge & Heavy Structures "
+                                "Professional | Infrastructure"
+                            ),
+                            "reason_code": "SOURCE_DATA_INCOMPLETE",
+                            "reason": (
+                                "Headline updated after "
+                                "document verification."
+                            ),
+                        },
+                    ],
+                },
+                request_only=True,
+            ),
+        ],
+
+        tags=[
+            "calculated-fields"
+        ],
+
+        summary=(
+            "Admin verify calculated fields"
+        ),
+
+        description=(
+            "Handles single or multiple calculated "
+            "field overrides in one request."
+        ),
+    )
+    def post(self, request):
+
+        serializer = (
+            CalculatedFieldAdminVerificationSerializer(
+                data=request.data
+            )
+        )
+
+        # ---------------------------------------------------------------------
+        # Request validation
+        # ---------------------------------------------------------------------
+
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "success": False,
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+
+        # ---------------------------------------------------------------------
+        # Professional
+        # ---------------------------------------------------------------------
+
+        try:
+            professional = (
+                ProfessionalProfile.objects.get(
+                    pk=data[
+                        "professional_profile_id"
+                    ]
+                )
+            )
+
+        except ProfessionalProfile.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "ProfessionalProfile "
+                        "not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ---------------------------------------------------------------------
+        # Admin / updated_by
+        # ---------------------------------------------------------------------
+
+        try:
+            updated_by = (
+                UserTbl.objects.get(
+                    pk=data["updated_by"]
+                )
+            )
+
+        except UserTbl.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Updated-by user "
+                        "not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # One batch for entire single/bulk submit.
+        batch_id = uuid.uuid4()
+
+        ruleset_version = data.get(
+            "system_ruleset_version",
+            "",
+        )
+
+        # ---------------------------------------------------------------------
+        # Entire request is atomic.
+        # ---------------------------------------------------------------------
+
+        try:
+
+            with transaction.atomic():
+
+                results = []
+
+                for index, item in enumerate(
+                    data["fields"]
+                ):
+
+                    try:
+
+                        result = (
+                            process_calculated_field(
+                                batch_id=batch_id,
+                                professional=professional,
+                                updated_by=updated_by,
+                                item=item,
+                                ruleset_version=ruleset_version,
+                            )
+                        )
+
+                        result[
+                            "request_index"
+                        ] = index
+
+                        results.append(
+                            result
+                        )
+
+                    except serializers.ValidationError as exc:
+
+                        # Add which array item failed.
+                        raise serializers.ValidationError({
+                            "field_index": index,
+                            "calculation_field_code": (
+                                item.get(
+                                    "calculation_field_code"
+                                )
+                            ),
+                            "errors": exc.detail,
+                        })
+
+        # ---------------------------------------------------------------------
+        # Validation problem → transaction rollback.
+        # ---------------------------------------------------------------------
+
+        except serializers.ValidationError as exc:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Calculated field verification "
+                        "failed. No records were changed."
+                    ),
+                    "errors": exc.detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ---------------------------------------------------------------------
+        # Other unexpected problem → transaction rollback.
+        # ---------------------------------------------------------------------
+
+        except Exception as exc:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Calculated field verification "
+                        "failed. No records were changed."
+                    ),
+                    "error": str(exc),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # ---------------------------------------------------------------------
+        # Separate UPDATED / SKIPPED
+        # ---------------------------------------------------------------------
+
+        updated_results = [
+            row
+            for row in results
+            if row["status"] == "UPDATED"
+        ]
+
+        skipped_results = [
+            row
+            for row in results
+            if row["status"] == "SKIPPED"
+        ]
+
+        created_override_count = len([
+            row
+            for row in updated_results
+            if row.get("override_action") == "CREATED"
+        ])
+
+        updated_override_count = len([
+            row
+            for row in updated_results
+            if row.get("override_action") == "UPDATED"
+        ])
+
+        # ---------------------------------------------------------------------
+        # Response
+        # ---------------------------------------------------------------------
+
+        return Response(
+            {
+                "success": True,
+
+                "message": (
+                    "Calculated field verification "
+                    "completed successfully."
+                ),
+
+                "batch_id": str(
+                    batch_id
+                ),
+
+                "professional_profile_id": (
+                    professional.pk
+                ),
+
+                "submitted_count": len(
+                    results
+                ),
+
+                "changed_count": len(
+                    updated_results
+                ),
+
+                "skipped_count": len(
+                    skipped_results
+                ),
+
+                "new_override_records": (
+                    created_override_count
+                ),
+
+                "existing_override_records_updated": (
+                    updated_override_count
+                ),
+
+                "new_history_records": len(
+                    updated_results
+                ),
+
+                "updated_fields": (
+                    updated_results
+                ),
+
+                "skipped_fields": (
+                    skipped_results
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 @method_decorator(csrf_exempt, name="dispatch")
 class OverrideCalculatedFieldAPIView(APIView):

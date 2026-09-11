@@ -85,7 +85,15 @@ urlpatterns = [
         OverrideCalculatedFieldAPIView.as_view(),
         name="calculated-field-override",
     ),
-        
+
+
+    path(
+        "calculated-fields/admin-verification/",
+        CalculatedFieldAdminVerificationAPIView.as_view(),
+        name="calculated-field-admin-verification",
+    ),
+    
+    
     path(
         "professional/calculated-fields/",
         ProfessionalCalculatedFieldsAPIView.as_view(),

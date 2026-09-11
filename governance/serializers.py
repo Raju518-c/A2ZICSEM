@@ -162,4 +162,111 @@ class CalculateFixedSystemFieldsRequestSerializer(serializers.Serializer):
     )
 
 
+
+SCOPE_FIELD_CODES = {
+    CalculatedFieldCode.CALENDAR_EXPERIENCE,
+    CalculatedFieldCode.VERIFIED_FIELD_DAYS,
+    CalculatedFieldCode.VERIFIED_PROJECT_COUNT,
+    CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED,
+    CalculatedFieldCode.QUALION_LEVEL,
+    CalculatedFieldCode.DEPLOYABILITY_FLAG,
+}
+
+class CalculatedFieldOverrideItemSerializer(serializers.Serializer):
+    calculation_field_code = serializers.ChoiceField(
+        choices=CalculatedFieldCode.choices
+    )
+
+    professional_scope_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+    )
+
+    project_record_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+    )
+
+    credential_record_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+    )
+
+    professional_review_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+    )
+
+    value = serializers.JSONField()
+
+    reason_code = serializers.ChoiceField(
+        choices=CalculatedFieldOverride.OverrideReasonCode.choices,
+        required=False,
+        allow_null=True,
+    )
+
+    reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=3000,
+    )
+
+    evidence_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        code = attrs["calculation_field_code"]
+
+        if code in SCOPE_FIELD_CODES and not attrs.get("professional_scope_id"):
+            raise serializers.ValidationError({
+                "professional_scope_id": f"professional_scope_id is required for {code}."
+            })
+
+        if code == CalculatedFieldCode.PROJECT_RESPONSIBILITY_BULLETS and not attrs.get("project_record_id"):
+            raise serializers.ValidationError({
+                "project_record_id": "project_record_id is required."
+            })
+
+        if code == CalculatedFieldCode.CREDENTIAL_STATUS and not attrs.get("credential_record_id"):
+            raise serializers.ValidationError({
+                "credential_record_id": "credential_record_id is required."
+            })
+
+        if code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION and not attrs.get("professional_review_id"):
+            raise serializers.ValidationError({
+                "professional_review_id": "professional_review_id is required."
+            })
+
+        return attrs
+
+
+class CalculatedFieldAdminVerificationSerializer(serializers.Serializer):
+    professional_profile_id = serializers.IntegerField()
+    updated_by = serializers.IntegerField()
+
+    system_ruleset_version = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    fields = CalculatedFieldOverrideItemSerializer(
+        many=True,
+        allow_empty=False,
+    )
+
+class CalculatedFieldOverrideSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalculatedFieldOverride
+        fields = "__all__"
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class CalculatedFieldValueHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalculatedFieldValueHistory
+        fields = "__all__"
+        read_only_fields = ("created_at",)
         

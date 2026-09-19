@@ -388,6 +388,35 @@ class TenantTaxRegistrationSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class TenantLegalEntityCombinedSerializer(serializers.ModelSerializer):
+
+    tax_registrations = serializers.JSONField(
+        required=False
+    )
+
+    class Meta:
+        model = TenantLegalEntity
+        fields = "__all__"
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        tax_registrations = (
+            TenantTaxRegistration.objects
+            .filter(legal_entity=instance)
+            .order_by("-created_at")
+        )
+
+        data["tax_registrations"] = (
+            TenantTaxRegistrationSerializer(
+                tax_registrations,
+                many=True
+            ).data
+        )
+
+        return data
+
+
 class TenantDomainSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantDomain
@@ -688,6 +717,12 @@ class TenantBillingSerializer(serializers.ModelSerializer):
         model = TenantBilling
         fields = "__all__"
         read_only_fields = ["updated_at"]
+
+
+class TenantRoleAssignmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantRoleAssignment
+        fields = "__all__"
 
 
 

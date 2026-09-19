@@ -6,7 +6,10 @@ from drf_spectacular.utils import (
     OpenApiRequest,
     PolymorphicProxySerializer,
     extend_schema,
+    inline_serializer,
+    OpenApiTypes,
 )
+from rest_framework import serializers
 from rest_framework import parsers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -18,6 +21,7 @@ from django.utils import timezone
 from django.db import transaction
 from accounts.models import UserTbl, roles
 import uuid
+import json
 from catalog.models import *
 
 def _request_example(serializer_class):
@@ -692,6 +696,134 @@ def resolve_tenant(request):
     Raising/returning None left as a placeholder until that's wired up.
     """
     return getattr(request, "tenant", None)
+
+
+# Only models in this allowlist can be requested by the tenant aggregate API.
+# The queryset in each entry is scoped to the supplied tenant before serialization.
+TENANT_RECORD_TABLES = {
+    "tenant": (Tenant, TenantSerializer, lambda tenant_id: Tenant.objects.filter(pk=tenant_id)),
+    "tenant_operations": (TenantOperation, TenantOperationSerializer, lambda tenant_id: TenantOperation.objects.filter(tenant_id=tenant_id)),
+    "organizations": (Organization, OrganizationSerializer, lambda tenant_id: Organization.objects.filter(tenant_id=tenant_id)),
+    "tenant_legal_entities": (TenantLegalEntity, TenantLegalEntitySerializer, lambda tenant_id: TenantLegalEntity.objects.filter(tenant_id=tenant_id)),
+    "tenant_tax_registrations": (TenantTaxRegistration, TenantTaxRegistrationSerializer, lambda tenant_id: TenantTaxRegistration.objects.filter(tenant_id=tenant_id)),
+    "tenant_domains": (TenantDomain, TenantDomainSerializer, lambda tenant_id: TenantDomain.objects.filter(tenant_id=tenant_id)),
+    "tenant_locations": (TenantLocation, TenantLocationSerializer, lambda tenant_id: TenantLocation.objects.filter(tenant_id=tenant_id)),
+    "tenant_authorised_representatives": (TenantAuthorisedRepresentative, TenantAuthorisedRepresentativeSerializer, lambda tenant_id: TenantAuthorisedRepresentative.objects.filter(tenant_id=tenant_id)),
+    "tenant_contacts": (TenantContact, TenantContactSerializer, lambda tenant_id: TenantContact.objects.filter(tenant_id=tenant_id)),
+    "tenant_verifications": (TenantVerification, TenantVerificationSerializer, lambda tenant_id: TenantVerification.objects.filter(tenant_id=tenant_id)),
+    "tenant_documents": (TenantDocument, TenantDocumentSerializer, lambda tenant_id: TenantDocument.objects.filter(tenant_id=tenant_id)),
+    "tenant_legal_acceptances": (TenantLegalAcceptance, TenantLegalAcceptanceSerializer, lambda tenant_id: TenantLegalAcceptance.objects.filter(tenant_id=tenant_id)),
+    "tenant_legal_settings": (TenantLegalSettings, TenantLegalSettingsSerializer, lambda tenant_id: TenantLegalSettings.objects.filter(tenant_id=tenant_id)),
+    "tenant_ndas": (TenantNda, TenantNdaSerializer, lambda tenant_id: TenantNda.objects.filter(tenant_id=tenant_id)),
+    "tenant_settings": (TenantSettings, TenantSettingsSerializer, lambda tenant_id: TenantSettings.objects.filter(tenant_id=tenant_id)),
+    "tenant_subscriptions": (TenantSubscription, TenantSubscriptionSerializer, lambda tenant_id: TenantSubscription.objects.filter(tenant_id=tenant_id)),
+    "tenant_module_entitlements": (TenantModuleEntitlement, TenantModuleEntitlementSerializer, lambda tenant_id: TenantModuleEntitlement.objects.filter(tenant_id=tenant_id)),
+    "tenant_brandings": (TenantBranding, TenantBrandingSerializer, lambda tenant_id: TenantBranding.objects.filter(tenant_id=tenant_id)),
+    "tenant_report_templates": (TenantReportTemplate, TenantReportTemplateSerializer, lambda tenant_id: TenantReportTemplate.objects.filter(tenant_id=tenant_id)),
+    "tenant_security_settings": (TenantSecuritySettings, TenantSecuritySettingsSerializer, lambda tenant_id: TenantSecuritySettings.objects.filter(tenant_id=tenant_id)),
+    "tenant_ip_restrictions": (TenantIPRestriction, TenantIPRestrictionSerializer, lambda tenant_id: TenantIPRestriction.objects.filter(security_settings__tenant_id=tenant_id)),
+    "tenant_integrations": (TenantIntegration, TenantIntegrationSerializer, lambda tenant_id: TenantIntegration.objects.filter(tenant_id=tenant_id)),
+    "tenant_billings": (TenantBilling, TenantBillingSerializer, lambda tenant_id: TenantBilling.objects.filter(tenant_id=tenant_id)),
+    "tenant_role_assignments": (TenantRoleAssignment, TenantRoleAssignmentSerializer, lambda tenant_id: TenantRoleAssignment.objects.filter(user__tenant_id=tenant_id)),
+    "tenant_invitations": (TenantInvitation, TenantInvitationSerializer, lambda tenant_id: TenantInvitation.objects.filter(tenant_id=tenant_id)),
+    "tenant_workflows": (TenantWorkflow, TenantWorkflowSerializer, lambda tenant_id: TenantWorkflow.objects.filter(tenant_id=tenant_id)),
+    "tenant_workflow_steps": (TenantWorkflowStep, TenantWorkflowStepSerializer, lambda tenant_id: TenantWorkflowStep.objects.filter(workflow__tenant_id=tenant_id)),
+    "tenant_operation_logs": (TenantOperationLog, TenantOperationLogSerializer, lambda tenant_id: TenantOperationLog.objects.filter(tenant_id=tenant_id)),
+    "tenant_terminology": (TenantTerminology, TenantTerminologySerializer, lambda tenant_id: TenantTerminology.objects.filter(tenant_id=tenant_id)),
+    "tenant_numbering_configs": (TenantNumberingConfig, TenantNumberingConfigSerializer, lambda tenant_id: TenantNumberingConfig.objects.filter(tenant_id=tenant_id)),
+    "tenant_approval_matrices": (TenantApprovalMatrix, TenantApprovalMatrixSerializer, lambda tenant_id: TenantApprovalMatrix.objects.filter(tenant_id=tenant_id)),
+    "tenant_notification_settings": (TenantNotificationSettings, TenantNotificationSettingsSerializer, lambda tenant_id: TenantNotificationSettings.objects.filter(tenant_id=tenant_id)),
+    "conflict_of_interest_declarations": (ConflictOfInterestDeclaration, ConflictOfInterestDeclarationSerializer, lambda tenant_id: ConflictOfInterestDeclaration.objects.filter(tenant_id=tenant_id)),
+    "data_export_requests": (DataExportRequest, DataExportRequestSerializer, lambda tenant_id: DataExportRequest.objects.filter(tenant_id=tenant_id)),
+    "projects": (Project, ProjectSerializer, lambda tenant_id: Project.objects.filter(tenant_id=tenant_id)),
+    "project_memberships": (ProjectMembership, ProjectMembershipSerializer, lambda tenant_id: ProjectMembership.objects.filter(project__tenant_id=tenant_id)),
+    "project_requirements": (ProjectRequirement, ProjectRequirementSerializer, lambda tenant_id: ProjectRequirement.objects.filter(project__tenant_id=tenant_id)),
+    "project_requirement_scopes": (ProjectRequirementScope, ProjectRequirementScopeSerializer, lambda tenant_id: ProjectRequirementScope.objects.filter(requirement__project__tenant_id=tenant_id)),
+    "project_candidates": (ProjectCandidate, ProjectCandidateSerializer, lambda tenant_id: ProjectCandidate.objects.filter(project__tenant_id=tenant_id)),
+    "disclosure_requests": (DisclosureRequest, DisclosureRequestSerializer, lambda tenant_id: DisclosureRequest.objects.filter(tenant_id=tenant_id)),
+    "candidate_consents": (CandidateConsent, CandidateConsentSerializer, lambda tenant_id: CandidateConsent.objects.filter(disclosure_request__tenant_id=tenant_id)),
+    "project_placements": (ProjectPlacement, ProjectPlacementSerializer, lambda tenant_id: ProjectPlacement.objects.filter(project__tenant_id=tenant_id)),
+    "project_scope_links": (ProjectScopeLink, ProjectScopeLinkSerializer, lambda tenant_id: ProjectScopeLink.objects.filter(project__tenant_id=tenant_id)),
+    "users": (UserTbl, UserTblserializers, lambda tenant_id: UserTbl.objects.filter(tenant_id=tenant_id)),
+    "roles": (roles, rolesserializers, lambda tenant_id: roles.objects.filter(tenant_id=tenant_id)),
+}
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantRecordsAPIView(APIView):
+    """Return selected tenant and tenant-owned child tables in one response."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        """Accept tenant_id and tables as a JSON request body."""
+        return self.get(request)
+
+    def _tables_from_request(self, request):
+        raw_tables = request.query_params.getlist("tables")
+        if not raw_tables and getattr(request, "data", None):
+            raw_tables = request.data.get("tables", [])
+        if isinstance(raw_tables, str):
+            raw_tables = raw_tables.strip()
+            try:
+                raw_tables = json.loads(raw_tables)
+            except json.JSONDecodeError:
+                raw_tables = raw_tables.split(",")
+        if not isinstance(raw_tables, (list, tuple)):
+            return []
+        return [str(table).strip() for table in raw_tables if str(table).strip()]
+
+    def get(self, request):
+        tenant_id = request.query_params.get("tenant_id")
+        if tenant_id is None and getattr(request, "data", None):
+            tenant_id = request.data.get("tenant_id")
+
+        if not tenant_id:
+            return Response(
+                {"success": False, "message": "tenant_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            tenant = Tenant.objects.get(pk=tenant_id)
+        except (Tenant.DoesNotExist, ValueError, TypeError):
+            return Response(
+                {"success": False, "message": "Tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        table_names = self._tables_from_request(request)
+        if not table_names:
+            return Response(
+                {"success": False, "message": "tables must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unknown_tables = sorted(set(table_names) - set(TENANT_RECORD_TABLES))
+        if unknown_tables:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Unknown table name(s).",
+                    "unknown_tables": unknown_tables,
+                    "available_tables": sorted(TENANT_RECORD_TABLES),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = {}
+        for table_name in dict.fromkeys(table_names):
+            _, serializer_class, queryset_factory = TENANT_RECORD_TABLES[table_name]
+            queryset = queryset_factory(tenant.pk)
+            data[table_name] = serializer_class(
+                queryset if hasattr(queryset, "model") else queryset.first(),
+                many=hasattr(queryset, "model"),
+            ).data
+
+        return Response(
+            {"success": True, "tenant_id": tenant.pk, "data": data},
+            status=status.HTTP_200_OK,
+        )
 
 
 # ---------------------------------------------------------------------
@@ -5918,6 +6050,1113 @@ class ProjectCreateWithMembershipsAPIView(APIView):
                 },
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+
+
+def _normalize_to_list(data):
+    """
+    Accept:
+        {...}
+    or:
+        [{...}, {...}]
+
+    Returns:
+        list, was_single
+    """
+
+    if isinstance(data, list):
+        return data, False
+
+    if isinstance(data, dict):
+        return [data], True
+
+    return None, False
+
+
+def _serialize_combined_legal_entities(queryset_or_instance, many=False):
+    return TenantLegalEntityCombinedSerializer(
+        queryset_or_instance,
+        many=many,
+    ).data
+
+
+# ============================================================
+# LIST + CREATE
+# ============================================================
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantLegalEntityCombinedListCreateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    # --------------------------------------------------------
+    # GET ALL
+    # --------------------------------------------------------
+
+    def get(self, request):
+
+        legal_entities = (
+            TenantLegalEntity.objects
+            .all()
+            .select_related(
+                "tenant",
+                "requested_by",
+                "reviewed_by",
+            )
+            .prefetch_related(
+                "tax_registrations"
+            )
+            .order_by("-created_at")
+        )
+
+        serializer = TenantLegalEntityCombinedSerializer(
+            legal_entities,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant legal entities fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # --------------------------------------------------------
+    # POST
+    #
+    # Supports:
+    #   single legal entity
+    #   multiple legal entities
+    #
+    # Each legal entity supports:
+    #   single/multiple tax registrations
+    # --------------------------------------------------------
+    @extend_schema(
+    request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Create Tenant Legal Entities",
+                value=[
+                    {
+                        "tenant": "tenant-uuid",
+                        "registration_number": "REG-001",
+                        "country_of_incorporation": "IN",
+                        "incorporation_date": "2026-09-17",
+                        "status": "PENDING",
+                        "requested_by": 1,
+                        "tax_registrations": [
+                            {
+                                "tax_type": "GST",
+                                "country_code": "IN",
+                                "tax_number": "36ABCDE1234F1Z5",
+                                "status": "ACTIVE"
+                            },
+                            {
+                                "tax_type": "PAN",
+                                "country_code": "IN",
+                                "tax_number": "ABCDE1234F",
+                                "status": "ACTIVE"
+                            }
+                        ]
+                    },
+                    {
+                        "tenant": "tenant-uuid",
+                        "registration_number": "REG-002",
+                        "country_of_incorporation": "AE",
+                        "incorporation_date": "2025-05-10",
+                        "status": "PENDING",
+                        "requested_by": 1,
+                        "tax_registrations": [
+                            {
+                                "tax_type": "VAT",
+                                "country_code": "AE",
+                                "tax_number": "100123456700003",
+                                "status": "ACTIVE"
+                            }
+                        ]
+                    }
+                ],
+                request_only=True,
+            )
+        ],
+        responses={
+            201: TenantLegalEntityCombinedSerializer(many=True)
+        },
+    )
+    @transaction.atomic    
+    def post(self, request):
+
+        payload = request.data
+
+        # ----------------------------------------------------
+        # Accept either:
+        #
+        # {
+        #     "legal_entities": [...]
+        # }
+        #
+        # OR
+        #
+        # {
+        #     "registration_number": "...",
+        #     ...
+        # }
+        # ----------------------------------------------------
+
+        if isinstance(payload, dict) and "legal_entities" in payload:
+            payload = payload.get("legal_entities")
+
+        legal_entities_data, was_single = _normalize_to_list(
+            payload
+        )
+
+        if legal_entities_data is None:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Payload must be an object or list "
+                        "of legal entities."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not legal_entities_data:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one legal entity is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_legal_entities = []
+
+        # ====================================================
+        # Loop legal entities
+        # ====================================================
+
+        for entity_index, entity_data in enumerate(
+            legal_entities_data
+        ):
+
+            if not isinstance(entity_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Each legal entity must be an object."
+                        ),
+                        "errors": {
+                            "legal_entities": {
+                                entity_index: (
+                                    "Invalid legal entity object."
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            entity_data = entity_data.copy()
+
+            tax_registrations = entity_data.pop(
+                "tax_registrations",
+                [],
+            )
+
+            # ------------------------------------------------
+            # tax_registrations can be:
+            #
+            # {}
+            # [{}, {}]
+            # []
+            # ------------------------------------------------
+
+            if tax_registrations is None:
+                tax_registrations = []
+
+            elif isinstance(tax_registrations, dict):
+                tax_registrations = [
+                    tax_registrations
+                ]
+
+            elif not isinstance(
+                tax_registrations,
+                list,
+            ):
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "legal_entities": {
+                                entity_index: {
+                                    "tax_registrations": [
+                                        (
+                                            "Expected an object "
+                                            "or list."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ------------------------------------------------
+            # Create TenantLegalEntity
+            # ------------------------------------------------
+
+            legal_entity_serializer = (
+                TenantLegalEntitySerializer(
+                    data=entity_data
+                )
+            )
+
+            if not legal_entity_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Tenant legal entity validation failed."
+                        ),
+                        "errors": {
+                            "legal_entities": {
+                                entity_index: (
+                                    legal_entity_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            legal_entity = (
+                legal_entity_serializer.save()
+            )
+
+            # ------------------------------------------------
+            # Create children
+            # ------------------------------------------------
+
+            for tax_index, tax_data in enumerate(
+                tax_registrations
+            ):
+
+                if not isinstance(tax_data, dict):
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "legal_entities": {
+                                    entity_index: {
+                                        "tax_registrations": {
+                                            tax_index: (
+                                                "Invalid object."
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                tax_data = tax_data.copy()
+
+                # Never trust parent FK from frontend.
+                tax_data.pop(
+                    "legal_entity",
+                    None,
+                )
+
+                # Child must belong to same tenant
+                # as parent legal entity.
+                tax_data.pop(
+                    "tenant",
+                    None,
+                )
+
+                tax_data["legal_entity"] = (
+                    legal_entity.pk
+                )
+
+                tax_data["tenant"] = (
+                    legal_entity.tenant_id
+                )
+
+                tax_serializer = (
+                    TenantTaxRegistrationSerializer(
+                        data=tax_data
+                    )
+                )
+
+                if not tax_serializer.is_valid():
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "message": (
+                                "Tax registration "
+                                "validation failed."
+                            ),
+                            "errors": {
+                                "legal_entities": {
+                                    entity_index: {
+                                        "tax_registrations": {
+                                            tax_index: (
+                                                tax_serializer.errors
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                tax_serializer.save()
+
+            created_legal_entities.append(
+                legal_entity
+            )
+
+        # ====================================================
+        # Response
+        # ====================================================
+
+        created_ids = [
+            obj.pk
+            for obj in created_legal_entities
+        ]
+
+        result = (
+            TenantLegalEntity.objects
+            .filter(pk__in=created_ids)
+            .select_related(
+                "tenant",
+                "requested_by",
+                "reviewed_by",
+            )
+            .prefetch_related(
+                "tax_registrations"
+            )
+        )
+
+        serializer = TenantLegalEntityCombinedSerializer(
+            result,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant legal entities and tax "
+                    "registrations created successfully."
+                ),
+                "data": (
+                    serializer.data[0]
+                    if was_single
+                    else serializer.data
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ============================================================
+# RETRIEVE + UPDATE
+# ============================================================
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantLegalEntityCombinedRetrieveUpdateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+
+        try:
+            return (TenantLegalEntity.objects.select_related("tenant","requested_by","reviewed_by",
+                                                         ).prefetch_related("tax_registrations").get(pk=pk))
+
+        except TenantLegalEntity.DoesNotExist:
+            return None
+
+    # --------------------------------------------------------
+    # GET BY LEGAL ENTITY ID
+    # --------------------------------------------------------
+
+    def get(self, request, pk):
+
+        legal_entity = self.get_object(pk)
+
+        if not legal_entity:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant legal entity not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = TenantLegalEntityCombinedSerializer(legal_entity)
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant legal entity fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # --------------------------------------------------------
+    # PUT
+    #
+    # Expected:
+    #
+    # {
+    #   "registration_number": "...",
+    #   ...
+    #
+    #   "tax_registrations": {
+    #
+    #       "updated": [
+    #           {
+    #               "id": "...",
+    #               "tax_number": "..."
+    #           }
+    #       ],
+    #
+    #       "deleted_ids": [
+    #           "...",
+    #           "..."
+    #       ],
+    #
+    #       "new": [
+    #           {
+    #               "tax_type": "GST",
+    #               ...
+    #           }
+    #       ]
+    #   }
+    # }
+    #
+    # --------------------------------------------------------
+    @extend_schema(
+    request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Update Tenant Legal Entity",
+                value={
+                    "registration_number": "REG-001-UPDATED",
+                    "country_of_incorporation": "IN",
+                    "incorporation_date": "2026-09-17",
+                    "status": "ACTIVE",
+
+                    "tax_registrations": {
+                        "updated": [
+                            {
+                                "id": "tax-registration-uuid-1",
+                                "tax_type": "GST",
+                                "country_code": "IN",
+                                "tax_number": "UPDATED-GST-001",
+                                "status": "ACTIVE"
+                            },
+                            {
+                                "id": "tax-registration-uuid-2",
+                                "tax_number": "UPDATED-TAX-002"
+                            }
+                        ],
+
+                        "deleted_ids": [
+                            "tax-registration-uuid-3",
+                            "tax-registration-uuid-4"
+                        ],
+
+                        "new": [
+                            {
+                                "tax_type": "GST",
+                                "country_code": "IN",
+                                "tax_number": "NEW-GST-001",
+                                "status": "ACTIVE"
+                            },
+                            {
+                                "tax_type": "VAT",
+                                "country_code": "AE",
+                                "tax_number": "NEW-VAT-001",
+                                "status": "ACTIVE"
+                            }
+                        ]
+                    }
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: TenantLegalEntityCombinedSerializer
+        },
+    )
+    @transaction.atomic    
+    def put(self, request, pk):
+
+        legal_entity = self.get_object(pk)
+
+        if not legal_entity:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant legal entity not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data.copy()
+
+        tax_operations = data.pop(
+            "tax_registrations",
+            {},
+        )
+
+        # Tenant cannot be changed through update.
+        data.pop("tenant", None)
+
+        # ID cannot be changed.
+        data.pop("id", None)
+
+        # ====================================================
+        # Validate tax operation structure
+        # ====================================================
+
+        if tax_operations is None:
+            tax_operations = {}
+
+        if not isinstance(tax_operations, dict):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "tax_registrations": [
+                            (
+                                "Expected an object containing "
+                                "updated, deleted_ids and new."
+                            )
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_records = tax_operations.get(
+            "updated",
+            [],
+        )
+
+        deleted_ids = tax_operations.get(
+            "deleted_ids",
+            [],
+        )
+
+        new_records = tax_operations.get(
+            "new",
+            [],
+        )
+
+        if not isinstance(updated_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "tax_registrations.updated": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(deleted_ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "tax_registrations.deleted_ids": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(new_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "tax_registrations.new": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # Update TenantLegalEntity
+        # ====================================================
+
+        legal_entity_serializer = (
+            TenantLegalEntitySerializer(
+                legal_entity,
+                data=data,
+                partial=True,
+            )
+        )
+
+        if not legal_entity_serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": (
+                        legal_entity_serializer.errors
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        legal_entity = (
+            legal_entity_serializer.save()
+        )
+
+        # ====================================================
+        # A. UPDATE existing TenantTaxRegistration
+        # ====================================================
+
+        for index, tax_data in enumerate(
+            updated_records
+        ):
+
+            if not isinstance(tax_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.updated": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tax_data = tax_data.copy()
+
+            tax_id = tax_data.pop(
+                "id",
+                None,
+            )
+
+            if not tax_id:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.updated": {
+                                index: {
+                                    "id": [
+                                        "This field is required."
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # IMPORTANT:
+            # only fetch child belonging to this parent.
+            try:
+                tax_registration = (
+                    TenantTaxRegistration.objects.get(
+                        pk=tax_id,
+                        legal_entity=legal_entity,
+                    )
+                )
+
+            except TenantTaxRegistration.DoesNotExist:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.updated": {
+                                index: {
+                                    "id": [
+                                        (
+                                            "Tax registration not "
+                                            "found for this legal "
+                                            "entity."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Prevent moving child.
+            tax_data.pop(
+                "legal_entity",
+                None,
+            )
+
+            tax_data.pop(
+                "tenant",
+                None,
+            )
+
+            tax_serializer = (
+                TenantTaxRegistrationSerializer(
+                    tax_registration,
+                    data=tax_data,
+                    partial=True,
+                )
+            )
+
+            if not tax_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.updated": {
+                                index: (
+                                    tax_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tax_serializer.save()
+
+        # ====================================================
+        # B. DELETE TenantTaxRegistration
+        # ====================================================
+
+        if deleted_ids:
+
+            existing_delete_ids = set(
+                str(value)
+                for value in (
+                    TenantTaxRegistration.objects
+                    .filter(
+                        pk__in=deleted_ids,
+                        legal_entity=legal_entity,
+                    )
+                    .values_list(
+                        "pk",
+                        flat=True,
+                    )
+                )
+            )
+
+            requested_delete_ids = set(
+                str(value)
+                for value in deleted_ids
+            )
+
+            invalid_delete_ids = (
+                requested_delete_ids
+                - existing_delete_ids
+            )
+
+            if invalid_delete_ids:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.deleted_ids": [
+                                (
+                                    "These tax registration IDs "
+                                    "do not belong to this legal "
+                                    "entity: "
+                                    + ", ".join(
+                                        invalid_delete_ids
+                                    )
+                                )
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            TenantTaxRegistration.objects.filter(
+                pk__in=deleted_ids,
+                legal_entity=legal_entity,
+            ).delete()
+
+        # ====================================================
+        # C. CREATE new TenantTaxRegistration
+        # ====================================================
+
+        for index, tax_data in enumerate(
+            new_records
+        ):
+
+            if not isinstance(tax_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.new": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tax_data = tax_data.copy()
+
+            # Never accept these from frontend.
+            tax_data.pop(
+                "id",
+                None,
+            )
+
+            tax_data.pop(
+                "legal_entity",
+                None,
+            )
+
+            tax_data.pop(
+                "tenant",
+                None,
+            )
+
+            # Force correct parent and tenant.
+            tax_data["legal_entity"] = (
+                legal_entity.pk
+            )
+
+            tax_data["tenant"] = (
+                legal_entity.tenant_id
+            )
+
+            tax_serializer = (
+                TenantTaxRegistrationSerializer(
+                    data=tax_data
+                )
+            )
+
+            if not tax_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "tax_registrations.new": {
+                                index: (
+                                    tax_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tax_serializer.save()
+
+        # ====================================================
+        # Final response
+        # ====================================================
+
+        legal_entity = (
+            TenantLegalEntity.objects
+            .select_related(
+                "tenant",
+                "requested_by",
+                "reviewed_by",
+            )
+            .prefetch_related(
+                "tax_registrations"
+            )
+            .get(pk=legal_entity.pk)
+        )
+
+        serializer = TenantLegalEntityCombinedSerializer(
+            legal_entity
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant legal entity and tax "
+                    "registrations updated successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================
+# DELETE SINGLE / MULTIPLE
+# ============================================================
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantLegalEntityCombinedDeleteAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="TenantLegalEntityBulkDeleteRequest",
+            fields={
+                "ids": serializers.ListField(
+                    child=serializers.IntegerField(),
+                    allow_empty=False,
+                ),
+            },
+        ),
+        responses={
+            200: OpenApiTypes.OBJECT,
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        ids = request.data.get("ids", [])
+
+        if not isinstance(ids, list):
+            return Response(
+                {
+                    "success": False,
+                    "message": "ids must be a list.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ids:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one TenantLegalEntity "
+                        "ID is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        legal_entities = TenantLegalEntity.objects.filter(
+            pk__in=ids
+        )
+
+        existing_ids = set(
+            legal_entities.values_list(
+                "pk",
+                flat=True,
+            )
+        )
+
+        requested_ids = set(ids)
+
+        invalid_ids = requested_ids - existing_ids
+
+        if invalid_ids:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "One or more TenantLegalEntity "
+                        "records were not found."
+                    ),
+                    "invalid_ids": list(invalid_ids),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deleted_ids = list(existing_ids)
+
+        # TenantTaxRegistration children are automatically
+        # deleted because of on_delete=models.CASCADE.
+        legal_entities.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant legal entities and their "
+                    "tax registrations deleted successfully."
+                ),
+                "data": {
+                    "deleted_ids": deleted_ids,
+                    "deleted_count": len(deleted_ids),
+                },
+            },
+            status=status.HTTP_200_OK,
         )
 
 

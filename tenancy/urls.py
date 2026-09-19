@@ -31,6 +31,11 @@ urlpatterns = [
         TenantResolveByHostAPIView.as_view(),
         name="tenant-by-host",
     ),
+    path(
+        "tenant-records/",
+        TenantRecordsAPIView.as_view(),
+        name="tenant-records",
+    ),
 
     path(
         "organizations/",
@@ -204,7 +209,9 @@ urlpatterns = [
     
     
     
-    
+    path("tenant-legal-entities/combined/",TenantLegalEntityCombinedListCreateAPIView.as_view(),name="tenant-legal-entity-combined-list-create",),    
+    path("tenant-legal-entities/combined/<int:pk>/", TenantLegalEntityCombinedRetrieveUpdateAPIView.as_view(), name="tenant-legal-entity-combined-detail",),    
+    path("tenant-legal-entities/combined/delete/", TenantLegalEntityCombinedDeleteAPIView.as_view(), name="tenant-legal-entity-combined-delete",),
     
     
     

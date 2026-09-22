@@ -815,31 +815,17 @@ class ProjectRequirementScopeSerializer(serializers.ModelSerializer):
 
 class ProjectRequirementCombinedSerializer(serializers.ModelSerializer):
 
-    requirement_scopes = serializers.JSONField(
-        required=False
-    )
+    requirement_scopes = serializers.SerializerMethodField()
 
     class Meta:
         model = ProjectRequirement
         fields = "__all__"
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-
-        requirement_scopes = (
-            ProjectRequirementScope.objects
-            .filter(requirement=instance)
-            .order_by("-created_at")
-        )
-
-        data["requirement_scopes"] = (
-            ProjectRequirementScopeSerializer(
-                requirement_scopes,
-                many=True
-            ).data
-        )
-
-        return data
+    def get_requirement_scopes(self, obj):
+        return ProjectRequirementScopeSerializer(
+            obj.scopes.all(),
+            many=True,
+        ).data
 
 class ProjectCandidateSerializer(serializers.ModelSerializer):
     class Meta:

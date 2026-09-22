@@ -7176,12 +7176,12 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
             .all()
             .select_related(
                 "project",
-                "tenant",
+                "role_code",
             )
             .prefetch_related(
-                "requirement_scopes"
+                "scopes",
             )
-            .order_by("-created_at")
+            .order_by("-id")
         )
 
         serializer = ProjectRequirementCombinedSerializer(
@@ -7213,12 +7213,11 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                 "Create Project Requirements",
                 value=[
                     {
-                        "tenant": 1,
                         "project": 1,
                         "role_code": 34,
                         "required_count": 5,
                         "minimum_experience_years": 3,
-                        "mandatory": True,
+                        "is_mandatory": True,
                         "remarks": "NDT experience preferred",
                         "requirement_scopes": [
                             {
@@ -7230,12 +7229,11 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                         ]
                     },
                     {
-                        "tenant": 1,
                         "project": 1,
                         "role_code": 35,
                         "required_count": 2,
                         "minimum_experience_years": 5,
-                        "mandatory": True,
+                        "is_mandatory": True,
                         "remarks": "",
                         "requirement_scopes": [
                             {
@@ -7291,7 +7289,7 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        created_requirements = []
+        created_ids = []
 
         # ====================================================
         # LOOP REQUIREMENTS
@@ -7326,7 +7324,18 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                 [],
             )
 
-            # Allow one object also
+            # Support old frontend field also
+            if (
+                "mandatory" in requirement_data
+                and "is_mandatory" not in requirement_data
+            ):
+                requirement_data["is_mandatory"] = (
+                    requirement_data.pop("mandatory")
+                )
+
+            # ProjectRequirement does not have tenant field
+            requirement_data.pop("tenant", None)
+
             if requirement_scopes is None:
                 requirement_scopes = []
 
@@ -7362,7 +7371,7 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                 )
 
             # =================================================
-            # CREATE ProjectRequirement
+            # CREATE PARENT
             # =================================================
 
             requirement_serializer = (
@@ -7396,7 +7405,7 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
             requirement = requirement_serializer.save()
 
             # =================================================
-            # CREATE ProjectRequirementScope CHILDREN
+            # CREATE CHILD SCOPES
             # =================================================
 
             for scope_index, scope_data in enumerate(
@@ -7427,15 +7436,13 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
 
                 scope_data = scope_data.copy()
 
-                # Do not trust parent from frontend
+                # Frontend cannot choose another parent
                 scope_data.pop(
                     "requirement",
                     None,
                 )
 
-                scope_data["requirement"] = (
-                    requirement.pk
-                )
+                scope_data["requirement"] = requirement.pk
 
                 scope_serializer = (
                     ProjectRequirementScopeSerializer(
@@ -7471,24 +7478,24 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
 
                 scope_serializer.save()
 
-            created_requirements.append(
-                requirement
+            created_ids.append(
+                requirement.pk
             )
 
         # ====================================================
         # RESPONSE
+        # IMPORTANT: actual related_name = "scopes"
         # ====================================================
-
-        created_ids = [
-            obj.pk
-            for obj in created_requirements
-        ]
 
         result = (
             ProjectRequirement.objects
             .filter(pk__in=created_ids)
+            .select_related(
+                "project",
+                "role_code",
+            )
             .prefetch_related(
-                "requirement_scopes"
+                "scopes",
             )
         )
 
@@ -7496,6 +7503,8 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
             result,
             many=True,
         )
+
+        response_data = serializer.data
 
         return Response(
             {
@@ -7505,9 +7514,9 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                     "created successfully."
                 ),
                 "data": (
-                    serializer.data[0]
+                    response_data[0]
                     if was_single
-                    else serializer.data
+                    else response_data
                 ),
             },
             status=status.HTTP_201_CREATED,
@@ -7516,9 +7525,7 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ProjectRequirementCombinedRetrieveUpdateAPIView(
-    APIView
-):
+class ProjectRequirementCombinedRetrieveUpdateAPIView(APIView):
 
     permission_classes = [AllowAny]
 
@@ -7529,10 +7536,10 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
                 ProjectRequirement.objects
                 .select_related(
                     "project",
-                    "tenant",
+                    "role_code",
                 )
                 .prefetch_related(
-                    "requirement_scopes"
+                    "scopes",
                 )
                 .get(pk=pk)
             )
@@ -7586,36 +7593,29 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
             OpenApiExample(
                 "Update Project Requirement",
                 value={
+                    "project": 1,
                     "role_code": 34,
                     "required_count": 10,
                     "minimum_experience_years": 5,
-                    "mandatory": True,
+                    "is_mandatory": True,
                     "remarks": "Updated requirement",
                     "requirement_scopes": {
                         "updated": [
-                        {
-                            "id": 1,
-                            "scope_catalog": 20
-                        },
-                        {
-                            "id": 2,
-                            "scope_catalog": 21
-                        }
+                            {
+                                "id": 1,
+                                "scope_catalog": 20
+                            }
                         ],
                         "deleted_ids": [
-                        3,
-                        4
+                            2
                         ],
                         "new": [
-                        {
-                            "scope_catalog": 25
-                        },
-                        {
-                            "scope_catalog": 26
-                        }
+                            {
+                                "scope_catalog": 25
+                            }
                         ]
                     }
-                    },
+                },
                 request_only=True,
             )
         ],
@@ -7647,11 +7647,23 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
             {},
         )
 
-        # Don't allow ID changes
         data.pop("id", None)
+        data.pop("public_id", None)
+
+        # ProjectRequirement doesn't have tenant directly
+        data.pop("tenant", None)
+
+        # Support old frontend name
+        if (
+            "mandatory" in data
+            and "is_mandatory" not in data
+        ):
+            data["is_mandatory"] = data.pop(
+                "mandatory"
+            )
 
         # ====================================================
-        # VALIDATE OPERATION STRUCTURE
+        # VALIDATE CHILD OPERATIONS
         # ====================================================
 
         if scope_operations is None:
@@ -7748,6 +7760,9 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
             return Response(
                 {
                     "success": False,
+                    "message": (
+                        "Project requirement validation failed."
+                    ),
                     "errors": (
                         requirement_serializer.errors
                     ),
@@ -7840,9 +7855,14 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Cannot move child to another parent
+            # Cannot move child to another requirement
             scope_data.pop(
                 "requirement",
+                None,
+            )
+
+            scope_data.pop(
+                "id",
                 None,
             )
 
@@ -7875,7 +7895,7 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
             scope_serializer.save()
 
         # ====================================================
-        # B. DELETE SCOPES
+        # B. DELETE EXISTING SCOPES
         # ====================================================
 
         if deleted_ids:
@@ -8003,8 +8023,12 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
 
         requirement = (
             ProjectRequirement.objects
+            .select_related(
+                "project",
+                "role_code",
+            )
             .prefetch_related(
-                "requirement_scopes"
+                "scopes",
             )
             .get(pk=requirement.pk)
         )
@@ -8041,6 +8065,15 @@ class ProjectRequirementCombinedDeleteAPIView(APIView):
                 ),
             },
         ),
+        examples=[
+            OpenApiExample(
+                "Delete Project Requirements",
+                value={
+                    "ids": [1, 2, 3]
+                },
+                request_only=True,
+            )
+        ],
         responses={
             200: OpenApiTypes.OBJECT,
         },
@@ -8115,9 +8148,8 @@ class ProjectRequirementCombinedDeleteAPIView(APIView):
             existing_ids
         )
 
-        # ProjectRequirementScope children will be
-        # deleted automatically if requirement FK
-        # uses on_delete=models.CASCADE.
+        # ProjectRequirementScope is CASCADE,
+        # so child scopes are automatically deleted.
         requirements.delete()
 
         return Response(
@@ -8136,8 +8168,6 @@ class ProjectRequirementCombinedDeleteAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
 
 
 

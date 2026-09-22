@@ -7215,33 +7215,31 @@ class ProjectRequirementCombinedListCreateAPIView(APIView):
                     {
                         "tenant": 1,
                         "project": 1,
-                        "role_code": "INSPECTION_ENGINEER",
+                        "role_code": 34,
                         "required_count": 5,
                         "minimum_experience_years": 3,
                         "mandatory": True,
                         "remarks": "NDT experience preferred",
-
                         "requirement_scopes": [
                             {
-                                "scope": 10
+                                "scope_catalog": 10
                             },
                             {
-                                "scope": 11
+                                "scope_catalog": 11
                             }
                         ]
                     },
                     {
                         "tenant": 1,
                         "project": 1,
-                        "role_code": "QA_QC_ENGINEER",
+                        "role_code": 35,
                         "required_count": 2,
                         "minimum_experience_years": 5,
                         "mandatory": True,
                         "remarks": "",
-
                         "requirement_scopes": [
                             {
-                                "scope": 15
+                                "scope_catalog": 15
                             }
                         ]
                     }
@@ -7588,40 +7586,36 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
             OpenApiExample(
                 "Update Project Requirement",
                 value={
-                    "role_code": "INSPECTION_ENGINEER",
+                    "role_code": 34,
                     "required_count": 10,
                     "minimum_experience_years": 5,
-                    "mandatory": True,
+                    "mandatory": true,
                     "remarks": "Updated requirement",
-
                     "requirement_scopes": {
-
                         "updated": [
-                            {
-                                "id": 1,
-                                "scope": 20
-                            },
-                            {
-                                "id": 2,
-                                "scope": 21
-                            }
+                        {
+                            "id": 1,
+                            "scope_catalog": 20
+                        },
+                        {
+                            "id": 2,
+                            "scope_catalog": 21
+                        }
                         ],
-
                         "deleted_ids": [
-                            3,
-                            4
+                        3,
+                        4
                         ],
-
                         "new": [
-                            {
-                                "scope": 25
-                            },
-                            {
-                                "scope": 26
-                            }
+                        {
+                            "scope_catalog": 25
+                        },
+                        {
+                            "scope_catalog": 26
+                        }
                         ]
                     }
-                },
+                    },
                 request_only=True,
             )
         ],

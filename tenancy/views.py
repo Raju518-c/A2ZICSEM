@@ -7589,7 +7589,7 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(
                     "role_code": 34,
                     "required_count": 10,
                     "minimum_experience_years": 5,
-                    "mandatory": true,
+                    "mandatory": True,
                     "remarks": "Updated requirement",
                     "requirement_scopes": {
                         "updated": [

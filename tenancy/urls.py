@@ -213,6 +213,8 @@ urlpatterns = [
     path("tenant-legal-entities/combined/<int:pk>/", TenantLegalEntityCombinedRetrieveUpdateAPIView.as_view(), name="tenant-legal-entity-combined-detail",),    
     path("tenant-legal-entities/combined/delete/", TenantLegalEntityCombinedDeleteAPIView.as_view(), name="tenant-legal-entity-combined-delete",),
     
-    
+    path("project-requirements/combined/", ProjectRequirementCombinedListCreateAPIView.as_view(), name="project-requirement-combined-list-create",),
+    path("project-requirements/combined/<int:pk>/", ProjectRequirementCombinedRetrieveUpdateAPIView.as_view(), name="project-requirement-combined-detail",),
+    path("project-requirements/combined/delete/", ProjectRequirementCombinedDeleteAPIView.as_view(), name="project-requirement-combined-delete",),
     
 ]

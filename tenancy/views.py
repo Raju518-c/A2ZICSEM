@@ -7160,3 +7160,990 @@ class TenantLegalEntityCombinedDeleteAPIView(APIView):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectRequirementCombinedListCreateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    # ========================================================
+    # GET ALL
+    # ========================================================
+
+    def get(self, request):
+
+        requirements = (
+            ProjectRequirement.objects
+            .all()
+            .select_related(
+                "project",
+                "tenant",
+            )
+            .prefetch_related(
+                "requirement_scopes"
+            )
+            .order_by("-created_at")
+        )
+
+        serializer = ProjectRequirementCombinedSerializer(
+            requirements,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project requirements fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # POST
+    # Single / Multiple ProjectRequirement
+    # Each can contain multiple ProjectRequirementScope
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Create Project Requirements",
+                value=[
+                    {
+                        "tenant": 1,
+                        "project": 1,
+                        "role_code": "INSPECTION_ENGINEER",
+                        "required_count": 5,
+                        "minimum_experience_years": 3,
+                        "mandatory": True,
+                        "remarks": "NDT experience preferred",
+
+                        "requirement_scopes": [
+                            {
+                                "scope": 10
+                            },
+                            {
+                                "scope": 11
+                            }
+                        ]
+                    },
+                    {
+                        "tenant": 1,
+                        "project": 1,
+                        "role_code": "QA_QC_ENGINEER",
+                        "required_count": 2,
+                        "minimum_experience_years": 5,
+                        "mandatory": True,
+                        "remarks": "",
+
+                        "requirement_scopes": [
+                            {
+                                "scope": 15
+                            }
+                        ]
+                    }
+                ],
+                request_only=True,
+            )
+        ],
+        responses={
+            201: ProjectRequirementCombinedSerializer(
+                many=True
+            )
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        payload = request.data
+
+        # Accept single object OR list
+        if isinstance(payload, dict):
+            requirements_data = [payload]
+            was_single = True
+
+        elif isinstance(payload, list):
+            requirements_data = payload
+            was_single = False
+
+        else:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Payload must be an object or list "
+                        "of project requirements."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not requirements_data:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one project requirement "
+                        "is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_requirements = []
+
+        # ====================================================
+        # LOOP REQUIREMENTS
+        # ====================================================
+
+        for req_index, requirement_data in enumerate(
+            requirements_data
+        ):
+
+            if not isinstance(requirement_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirements": {
+                                req_index: (
+                                    "Invalid requirement object."
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            requirement_data = requirement_data.copy()
+
+            requirement_scopes = requirement_data.pop(
+                "requirement_scopes",
+                [],
+            )
+
+            # Allow one object also
+            if requirement_scopes is None:
+                requirement_scopes = []
+
+            elif isinstance(requirement_scopes, dict):
+                requirement_scopes = [
+                    requirement_scopes
+                ]
+
+            elif not isinstance(
+                requirement_scopes,
+                list,
+            ):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirements": {
+                                req_index: {
+                                    "requirement_scopes": [
+                                        (
+                                            "Expected an object "
+                                            "or list."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # =================================================
+            # CREATE ProjectRequirement
+            # =================================================
+
+            requirement_serializer = (
+                ProjectRequirementSerializer(
+                    data=requirement_data
+                )
+            )
+
+            if not requirement_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Project requirement validation "
+                            "failed."
+                        ),
+                        "errors": {
+                            "requirements": {
+                                req_index: (
+                                    requirement_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            requirement = requirement_serializer.save()
+
+            # =================================================
+            # CREATE ProjectRequirementScope CHILDREN
+            # =================================================
+
+            for scope_index, scope_data in enumerate(
+                requirement_scopes
+            ):
+
+                if not isinstance(scope_data, dict):
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "requirements": {
+                                    req_index: {
+                                        "requirement_scopes": {
+                                            scope_index: (
+                                                "Invalid object."
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                scope_data = scope_data.copy()
+
+                # Do not trust parent from frontend
+                scope_data.pop(
+                    "requirement",
+                    None,
+                )
+
+                scope_data["requirement"] = (
+                    requirement.pk
+                )
+
+                scope_serializer = (
+                    ProjectRequirementScopeSerializer(
+                        data=scope_data
+                    )
+                )
+
+                if not scope_serializer.is_valid():
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "message": (
+                                "Project requirement scope "
+                                "validation failed."
+                            ),
+                            "errors": {
+                                "requirements": {
+                                    req_index: {
+                                        "requirement_scopes": {
+                                            scope_index: (
+                                                scope_serializer.errors
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                scope_serializer.save()
+
+            created_requirements.append(
+                requirement
+            )
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        created_ids = [
+            obj.pk
+            for obj in created_requirements
+        ]
+
+        result = (
+            ProjectRequirement.objects
+            .filter(pk__in=created_ids)
+            .prefetch_related(
+                "requirement_scopes"
+            )
+        )
+
+        serializer = ProjectRequirementCombinedSerializer(
+            result,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project requirements and scopes "
+                    "created successfully."
+                ),
+                "data": (
+                    serializer.data[0]
+                    if was_single
+                    else serializer.data
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectRequirementCombinedRetrieveUpdateAPIView(
+    APIView
+):
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+
+        try:
+            return (
+                ProjectRequirement.objects
+                .select_related(
+                    "project",
+                    "tenant",
+                )
+                .prefetch_related(
+                    "requirement_scopes"
+                )
+                .get(pk=pk)
+            )
+
+        except ProjectRequirement.DoesNotExist:
+            return None
+
+    # ========================================================
+    # GET BY ID
+    # ========================================================
+
+    def get(self, request, pk):
+
+        requirement = self.get_object(pk)
+
+        if not requirement:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Project requirement not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProjectRequirementCombinedSerializer(
+            requirement
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project requirement fetched "
+                    "successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # PUT
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Update Project Requirement",
+                value={
+                    "role_code": "INSPECTION_ENGINEER",
+                    "required_count": 10,
+                    "minimum_experience_years": 5,
+                    "mandatory": True,
+                    "remarks": "Updated requirement",
+
+                    "requirement_scopes": {
+
+                        "updated": [
+                            {
+                                "id": 1,
+                                "scope": 20
+                            },
+                            {
+                                "id": 2,
+                                "scope": 21
+                            }
+                        ],
+
+                        "deleted_ids": [
+                            3,
+                            4
+                        ],
+
+                        "new": [
+                            {
+                                "scope": 25
+                            },
+                            {
+                                "scope": 26
+                            }
+                        ]
+                    }
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: ProjectRequirementCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def put(self, request, pk):
+
+        requirement = self.get_object(pk)
+
+        if not requirement:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Project requirement not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data.copy()
+
+        scope_operations = data.pop(
+            "requirement_scopes",
+            {},
+        )
+
+        # Don't allow ID changes
+        data.pop("id", None)
+
+        # ====================================================
+        # VALIDATE OPERATION STRUCTURE
+        # ====================================================
+
+        if scope_operations is None:
+            scope_operations = {}
+
+        if not isinstance(scope_operations, dict):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "requirement_scopes": [
+                            (
+                                "Expected an object containing "
+                                "updated, deleted_ids and new."
+                            )
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_records = scope_operations.get(
+            "updated",
+            [],
+        )
+
+        deleted_ids = scope_operations.get(
+            "deleted_ids",
+            [],
+        )
+
+        new_records = scope_operations.get(
+            "new",
+            [],
+        )
+
+        if not isinstance(updated_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "requirement_scopes.updated": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(deleted_ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "requirement_scopes.deleted_ids": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(new_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "requirement_scopes.new": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # UPDATE PARENT
+        # ====================================================
+
+        requirement_serializer = (
+            ProjectRequirementSerializer(
+                requirement,
+                data=data,
+                partial=True,
+            )
+        )
+
+        if not requirement_serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": (
+                        requirement_serializer.errors
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requirement = requirement_serializer.save()
+
+        # ====================================================
+        # A. UPDATE EXISTING SCOPES
+        # ====================================================
+
+        for index, scope_data in enumerate(
+            updated_records
+        ):
+
+            if not isinstance(scope_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.updated": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_data = scope_data.copy()
+
+            scope_record_id = scope_data.pop(
+                "id",
+                None,
+            )
+
+            if not scope_record_id:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.updated": {
+                                index: {
+                                    "id": [
+                                        "This field is required."
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                requirement_scope = (
+                    ProjectRequirementScope.objects.get(
+                        pk=scope_record_id,
+                        requirement=requirement,
+                    )
+                )
+
+            except ProjectRequirementScope.DoesNotExist:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.updated": {
+                                index: {
+                                    "id": [
+                                        (
+                                            "Project requirement "
+                                            "scope not found for "
+                                            "this requirement."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Cannot move child to another parent
+            scope_data.pop(
+                "requirement",
+                None,
+            )
+
+            scope_serializer = (
+                ProjectRequirementScopeSerializer(
+                    requirement_scope,
+                    data=scope_data,
+                    partial=True,
+                )
+            )
+
+            if not scope_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.updated": {
+                                index: (
+                                    scope_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_serializer.save()
+
+        # ====================================================
+        # B. DELETE SCOPES
+        # ====================================================
+
+        if deleted_ids:
+
+            existing_delete_ids = set(
+                ProjectRequirementScope.objects
+                .filter(
+                    pk__in=deleted_ids,
+                    requirement=requirement,
+                )
+                .values_list(
+                    "pk",
+                    flat=True,
+                )
+            )
+
+            requested_delete_ids = set(
+                deleted_ids
+            )
+
+            invalid_delete_ids = (
+                requested_delete_ids
+                - existing_delete_ids
+            )
+
+            if invalid_delete_ids:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.deleted_ids": [
+                                (
+                                    "These IDs do not belong "
+                                    "to this project requirement: "
+                                    + ", ".join(
+                                        map(
+                                            str,
+                                            invalid_delete_ids,
+                                        )
+                                    )
+                                )
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ProjectRequirementScope.objects.filter(
+                pk__in=deleted_ids,
+                requirement=requirement,
+            ).delete()
+
+        # ====================================================
+        # C. CREATE NEW SCOPES
+        # ====================================================
+
+        for index, scope_data in enumerate(
+            new_records
+        ):
+
+            if not isinstance(scope_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.new": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_data = scope_data.copy()
+
+            scope_data.pop(
+                "id",
+                None,
+            )
+
+            scope_data.pop(
+                "requirement",
+                None,
+            )
+
+            scope_data["requirement"] = (
+                requirement.pk
+            )
+
+            scope_serializer = (
+                ProjectRequirementScopeSerializer(
+                    data=scope_data
+                )
+            )
+
+            if not scope_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "requirement_scopes.new": {
+                                index: (
+                                    scope_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_serializer.save()
+
+        # ====================================================
+        # FINAL RESPONSE
+        # ====================================================
+
+        requirement = (
+            ProjectRequirement.objects
+            .prefetch_related(
+                "requirement_scopes"
+            )
+            .get(pk=requirement.pk)
+        )
+
+        serializer = ProjectRequirementCombinedSerializer(
+            requirement
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project requirement and scopes "
+                    "updated successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectRequirementCombinedDeleteAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="ProjectRequirementBulkDeleteRequest",
+            fields={
+                "ids": serializers.ListField(
+                    child=serializers.IntegerField(),
+                    allow_empty=False,
+                ),
+            },
+        ),
+        responses={
+            200: OpenApiTypes.OBJECT,
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        ids = request.data.get(
+            "ids",
+            [],
+        )
+
+        if not isinstance(ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "ids must be a list.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one ProjectRequirement "
+                        "ID is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requirements = (
+            ProjectRequirement.objects
+            .filter(pk__in=ids)
+        )
+
+        existing_ids = set(
+            requirements.values_list(
+                "pk",
+                flat=True,
+            )
+        )
+
+        requested_ids = set(ids)
+
+        invalid_ids = (
+            requested_ids
+            - existing_ids
+        )
+
+        if invalid_ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "One or more ProjectRequirement "
+                        "records were not found."
+                    ),
+                    "invalid_ids": list(
+                        invalid_ids
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deleted_ids = list(
+            existing_ids
+        )
+
+        # ProjectRequirementScope children will be
+        # deleted automatically if requirement FK
+        # uses on_delete=models.CASCADE.
+        requirements.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project requirements and their "
+                    "scopes deleted successfully."
+                ),
+                "data": {
+                    "deleted_ids": deleted_ids,
+                    "deleted_count": len(
+                        deleted_ids
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+
+

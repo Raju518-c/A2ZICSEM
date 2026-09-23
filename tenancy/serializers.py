@@ -686,6 +686,13 @@ class TenantReportTemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
 
+class TenantIPRestrictionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantIPRestriction
+        fields = "__all__"
+        read_only_fields = ["created_at"]
+
+
 class TenantSecuritySettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantSecuritySettings
@@ -693,12 +700,20 @@ class TenantSecuritySettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ["updated_at"]
 
 
-class TenantIPRestrictionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TenantIPRestriction
-        fields = "__all__"
-        read_only_fields = ["created_at"]
+class TenantSecuritySettingsCombinedSerializer(serializers.ModelSerializer):
 
+    ip_restrictions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenantSecuritySettings
+        fields = "__all__"
+
+    def get_ip_restrictions(self, obj):
+
+        return TenantIPRestrictionSerializer(
+            obj.ip_restrictions.all(),
+            many=True,
+        ).data
 
 class TenantIntegrationSerializer(serializers.ModelSerializer):
     # Docstring is explicit: "Never exported; encrypted at rest." That's a
@@ -733,18 +748,32 @@ class TenantInvitationSerializer(serializers.ModelSerializer):
         read_only_fields = ["sent_at"]
 
 
+class TenantWorkflowStepSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantWorkflowStep
+        fields = "__all__"
+
+
 class TenantWorkflowSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantWorkflow
         fields = "__all__"
         read_only_fields = ["created_at", "updated_at"]
 
+class TenantWorkflowCombinedSerializer(serializers.ModelSerializer):
 
-class TenantWorkflowStepSerializer(serializers.ModelSerializer):
+    steps = serializers.SerializerMethodField()
+
     class Meta:
-        model = TenantWorkflowStep
+        model = TenantWorkflow
         fields = "__all__"
 
+    def get_steps(self, obj):
+
+        return TenantWorkflowStepSerializer(
+            obj.steps.all(),
+            many=True,
+        ).data
 
 class TenantOperationLogSerializer(serializers.ModelSerializer):
     class Meta:
@@ -847,20 +876,34 @@ class CandidateConsentSerializer(serializers.ModelSerializer):
         read_only_fields = ["decided_at"]
 
 
+class ProjectScopeLinkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectScopeLink
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+        
 class ProjectPlacementSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectPlacement
         fields = "__all__"
 
 
-class ProjectScopeLinkSerializer(serializers.ModelSerializer):
+class ProjectPlacementCombinedSerializer(serializers.ModelSerializer):
+
+    scope_links = serializers.SerializerMethodField()
+
     class Meta:
-        model = ProjectScopeLink
+        model = ProjectPlacement
         fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
 
+    def get_scope_links(self, obj):
 
+        return ProjectScopeLinkSerializer(
+            obj.scope_links.all(),
+            many=True,
+        ).data
         
+
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
     """Plain single-record shape — used for GET/PUT responses and for

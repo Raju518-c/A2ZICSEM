@@ -219,16 +219,48 @@ ProfessionalProfileSerializer = CoreProfessionalProfileRelatedSerializer
 
 class TenantRegistrationInviteSerializer(serializers.ModelSerializer):
 
+    role_name = serializers.CharField(
+        source="role.name",
+        read_only=True
+    )
+
+    role_code = serializers.CharField(
+        source="role.code",
+        read_only=True
+    )
+
+    tenant_name = serializers.CharField(
+        source="tenant.name",
+        read_only=True
+    )
+
     class Meta:
         model = TenantRegistrationInvite
 
         fields = [
             "id",
             "email",
+            "description",
+            "registered_industry",
+
+            "invitation_type",
+
+            "tenant",
+            "tenant_name",
+
+            "role",
+            "role_code",
+            "role_name",
+
             "invitation_date_time",
             "is_registered",
             "registered_date_time",
+
             "invitation_token",
+
+            "tenant_rec",
+            "user_rec",
+
             "created_at",
             "updated_at",
         ]
@@ -239,11 +271,15 @@ class TenantRegistrationInviteSerializer(serializers.ModelSerializer):
             "is_registered",
             "registered_date_time",
             "invitation_token",
+            "tenant_rec",
+            "user_rec",
             "created_at",
             "updated_at",
         ]
 
-class TenantRegistrationInviteCreateSerializer(serializers.Serializer):
+class TenantRegistrationInviteCreateSerializer(
+    serializers.Serializer
+):
 
     email = serializers.EmailField(
         required=True
@@ -251,6 +287,21 @@ class TenantRegistrationInviteCreateSerializer(serializers.Serializer):
 
     registration_url = serializers.URLField(
         required=True
+    )
+
+    invitation_type = serializers.ChoiceField(
+        choices=TenantRegistrationInvite.InvitationType.choices,
+        required=True
+    )
+
+    tenant = serializers.UUIDField(
+        required=False,
+        allow_null=True
+    )
+
+    role = serializers.IntegerField(
+        required=False,
+        allow_null=True
     )
 
     description = serializers.CharField(
@@ -267,9 +318,110 @@ class TenantRegistrationInviteCreateSerializer(serializers.Serializer):
     )
 
     def validate_email(self, value):
-        return value.lower().strip()
+        return value.strip().lower()
 
     def validate_registration_url(self, value):
         return value.rstrip("/")
 
+    def validate(self, attrs):
+
+        invitation_type = attrs.get(
+            "invitation_type"
+        )
+
+        tenant_id = attrs.get("tenant")
+        role_id = attrs.get("role")
+
+        # ==============================================
+        # TENANT INVITATION
+        # ==============================================
+
+        if (
+            invitation_type
+            == TenantRegistrationInvite.InvitationType.TENANT
+        ):
+
+            if tenant_id:
+                raise serializers.ValidationError({
+                    "tenant":
+                        "Tenant must not be provided "
+                        "for TENANT invitation."
+                })
+
+            if role_id:
+                raise serializers.ValidationError({
+                    "role":
+                        "Role must not be provided "
+                        "for TENANT invitation."
+                })
+
+        # ==============================================
+        # USER INVITATION
+        # ==============================================
+
+        elif (
+            invitation_type
+            == TenantRegistrationInvite.InvitationType.USER
+        ):
+
+            if not tenant_id:
+                raise serializers.ValidationError({
+                    "tenant":
+                        "Tenant is required for USER invitation."
+                })
+
+            if not role_id:
+                raise serializers.ValidationError({
+                    "role":
+                        "Role is required for USER invitation."
+                })
+
+            try:
+                tenant = Tenant.objects.get(
+                    id=tenant_id
+                )
+            except Tenant.DoesNotExist:
+                raise serializers.ValidationError({
+                    "tenant": "Invalid tenant."
+                })
+
+            try:
+                role_obj = roles.objects.get(
+                    id=role_id
+                )
+            except roles.DoesNotExist:
+                raise serializers.ValidationError({
+                    "role": "Invalid role."
+                })
+
+            if role_obj.tenant_id != tenant.id:
+                raise serializers.ValidationError({
+                    "role":
+                        "Selected role does not belong "
+                        "to selected tenant."
+                })
+
+            attrs["tenant_obj"] = tenant
+            attrs["role_obj"] = role_obj
+
+        return attrs
+
+class TenantRegistrationInviteUpdateSerializer(serializers.ModelSerializer):
+    """
+    Used for PUT/PATCH.
+
+    Only email can be updated.
+    """
+
+    class Meta:
+        model = TenantRegistrationInvite
+
+        fields = [
+            "email",
+        ]
+
+class InvitedUserRegistrationSerializer(serializers.Serializer):
+    invitation_token = serializers.UUIDField(
+        required=True
+    )
 

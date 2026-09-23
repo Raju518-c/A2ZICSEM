@@ -462,9 +462,28 @@ import uuid
 
 
 class TenantRegistrationInvite(models.Model):
+    """
+    Common invitation table.
+
+    TENANT:
+        Super Admin -> invite a new tenant.
+
+    USER:
+        Tenant Admin -> invite an employee/user
+        under an existing tenant for a specific role.
+    """
+
+    class InvitationType(models.TextChoices):
+        TENANT = "TENANT", "Tenant"
+        USER = "USER", "User"
+
+    # ==================================================
+    # BASIC DETAILS
+    # ==================================================
 
     email = models.EmailField(
-        max_length=254
+        max_length=254,
+        db_index=True
     )
 
     description = models.TextField(
@@ -478,18 +497,53 @@ class TenantRegistrationInvite(models.Model):
         blank=True
     )
 
-    invitation_date_time = models.DateTimeField(
-        auto_now_add=True
+    # ==================================================
+    # INVITATION TYPE
+    # ==================================================
+
+    invitation_type = models.CharField(
+        max_length=20,
+        choices=InvitationType.choices,
+        default=InvitationType.TENANT,
+        db_index=True
     )
 
-    is_registered = models.BooleanField(
-        default=False
-    )
+    # ==================================================
+    # TENANT CONTEXT
+    # ==================================================
 
-    registered_date_time = models.DateTimeField(
+    tenant = models.ForeignKey(
+        "tenancy.Tenant",
+        on_delete=models.PROTECT,
         null=True,
-        blank=True
+        blank=True,
+        related_name="registration_invites",
+        db_index=True,
+        help_text=(
+            "Required for USER invitations. "
+            "NULL for new TENANT invitations."
+        ),
     )
+
+    # ==================================================
+    # USER ROLE
+    # ==================================================
+
+    role = models.ForeignKey(
+        "accounts.roles",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="registration_invites",
+        help_text=(
+            "Role assigned to invited user. "
+            "Required only for USER invitations."
+        ),
+    )
+
+    # ==================================================
+    # TOKEN
+    # ==================================================
 
     invitation_token = models.UUIDField(
         default=uuid.uuid4,
@@ -498,16 +552,50 @@ class TenantRegistrationInvite(models.Model):
     )
 
     # ==================================================
+    # REGISTRATION STATUS
+    # ==================================================
+
+    invitation_date_time = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    is_registered = models.BooleanField(
+        default=False,
+        db_index=True
+    )
+
+    registered_date_time = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    # ==================================================
     # REGISTERED TENANT
     # ==================================================
 
     tenant_rec = models.ForeignKey(
         "tenancy.Tenant",
-        on_delete=models.CASCADE,
-        related_name="tenant_registration_invites",
+        on_delete=models.PROTECT,
+        related_name="completed_registration_invites",
         null=True,
         blank=True
     )
+
+    # ==================================================
+    # REGISTERED USER
+    # ==================================================
+
+    user_rec = models.ForeignKey(
+        "accounts.UserTbl",
+        on_delete=models.PROTECT,
+        related_name="completed_registration_invites",
+        null=True,
+        blank=True
+    )
+
+    # ==================================================
+    # AUDIT
+    # ==================================================
 
     created_at = models.DateTimeField(
         auto_now_add=True
@@ -521,8 +609,53 @@ class TenantRegistrationInvite(models.Model):
         db_table = "tenant_registration_invite"
         ordering = ["-invitation_date_time"]
 
-    def __str__(self):
-        return self.email
-    
-    
+    def clean(self):
+        super().clean()
 
+        if self.invitation_type == self.InvitationType.TENANT:
+
+            if self.tenant_id:
+                raise ValidationError({
+                    "tenant":
+                        "Tenant must be empty for TENANT invitation."
+                })
+
+            if self.role_id:
+                raise ValidationError({
+                    "role":
+                        "Role must be empty for TENANT invitation."
+                })
+
+        elif self.invitation_type == self.InvitationType.USER:
+
+            if not self.tenant_id:
+                raise ValidationError({
+                    "tenant":
+                        "Tenant is required for USER invitation."
+                })
+
+            if not self.role_id:
+                raise ValidationError({
+                    "role":
+                        "Role is required for USER invitation."
+                })
+
+            if (
+                self.role_id
+                and self.role.tenant_id != self.tenant_id
+            ):
+                raise ValidationError({
+                    "role":
+                        "Selected role does not belong to "
+                        "the selected tenant."
+                })
+
+    def save(self, *args, **kwargs):
+
+        if self.email:
+            self.email = self.email.strip().lower()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.email} - {self.invitation_type}"

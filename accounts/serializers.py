@@ -206,6 +206,27 @@ class UserTblSerializer(serializers.ModelSerializer):
 
         return user
     
+class InvitedUserRegistrationSerializer(UserTblSerializer):
+
+    invitation_token = serializers.UUIDField(
+        required=True,
+        write_only=True
+    )
+
+    def get_field_names(
+        self,
+        declared_fields,
+        info
+    ):
+        fields = super().get_field_names(
+            declared_fields,
+            info
+        )
+
+        if "invitation_token" not in fields:
+            fields.append("invitation_token")
+
+        return fields
     
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:

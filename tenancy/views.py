@@ -197,7 +197,15 @@ class TenantListCreateAPIView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            invite = (TenantRegistrationInvite.objects.filter(invitation_token=invitation_token, is_registered=False).first())
+                
+            invite = TenantRegistrationInvite.objects.filter(
+                invitation_token=invitation_token,
+                invitation_type=(
+                    TenantRegistrationInvite.InvitationType.TENANT
+                ),
+                is_registered=False
+            ).first()
+            
             if not invite:
                 return Response(
                     {
@@ -8158,6 +8166,3096 @@ class ProjectRequirementCombinedDeleteAPIView(APIView):
                 "message": (
                     "Project requirements and their "
                     "scopes deleted successfully."
+                ),
+                "data": {
+                    "deleted_ids": deleted_ids,
+                    "deleted_count": len(
+                        deleted_ids
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectPlacementCombinedListCreateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    # ========================================================
+    # GET ALL
+    # ========================================================
+
+    def get(self, request):
+
+        placements = (
+            ProjectPlacement.objects
+            .all()
+            .select_related(
+                "project",
+                "professional",
+                "professional_assignment",
+            )
+            .prefetch_related(
+                "scope_links",
+            )
+            .order_by("-id")
+        )
+
+        serializer = ProjectPlacementCombinedSerializer(
+            placements,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project placements fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # POST
+    # Single / Multiple ProjectPlacement
+    # Each placement can contain multiple ProjectScopeLink
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Create Project Placements",
+                value=[
+                    {
+                        "project": 1,
+                        "professional": 2,
+                        "professional_assignment": None,
+                        "assigned_role": "Inspection Engineer",
+                        "deployment_start": "2026-09-23",
+                        "deployment_end": None,
+                        "status": "ACTIVE",
+                        "scope_links": [
+                            {
+                                "project": 1,
+                                "professional": 2,
+                                "experience_project_scope": None,
+                                "industry": 1,
+                                "scope_catalog": 10,
+                                "authority_action_code": 20,
+                                "allocation_percent": 100,
+                                "verified_field_days": 30,
+                                "evidence_document": None
+                            },
+                            {
+                                "project": 1,
+                                "professional": 2,
+                                "experience_project_scope": None,
+                                "industry": 1,
+                                "scope_catalog": 11,
+                                "authority_action_code": 20,
+                                "allocation_percent": 50,
+                                "verified_field_days": 15,
+                                "evidence_document": None
+                            }
+                        ]
+                    }
+                ],
+                request_only=True,
+            )
+        ],
+        responses={
+            201: ProjectPlacementCombinedSerializer(
+                many=True
+            )
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        payload = request.data
+
+        # Accept single object OR list
+        if isinstance(payload, dict):
+            placements_data = [payload]
+            was_single = True
+
+        elif isinstance(payload, list):
+            placements_data = payload
+            was_single = False
+
+        else:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Payload must be an object or list "
+                        "of project placements."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not placements_data:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one project placement "
+                        "is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_ids = []
+
+        # ====================================================
+        # LOOP PLACEMENTS
+        # ====================================================
+
+        for placement_index, placement_data in enumerate(
+            placements_data
+        ):
+
+            if not isinstance(placement_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "placements": {
+                                placement_index: (
+                                    "Invalid placement object."
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            placement_data = placement_data.copy()
+
+            scope_links = placement_data.pop(
+                "scope_links",
+                [],
+            )
+
+            # ------------------------------------------------
+            # Normalize scope_links
+            # ------------------------------------------------
+
+            if scope_links is None:
+                scope_links = []
+
+            elif isinstance(scope_links, dict):
+                scope_links = [scope_links]
+
+            elif not isinstance(scope_links, list):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "placements": {
+                                placement_index: {
+                                    "scope_links": [
+                                        (
+                                            "Expected an object "
+                                            "or list."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # =================================================
+            # CREATE PLACEMENT
+            # =================================================
+
+            placement_serializer = (
+                ProjectPlacementSerializer(
+                    data=placement_data
+                )
+            )
+
+            if not placement_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Project placement validation failed."
+                        ),
+                        "errors": {
+                            "placements": {
+                                placement_index: (
+                                    placement_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            placement = placement_serializer.save()
+
+            # =================================================
+            # CREATE SCOPE LINKS
+            # =================================================
+
+            for scope_index, scope_data in enumerate(
+                scope_links
+            ):
+
+                if not isinstance(scope_data, dict):
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "placements": {
+                                    placement_index: {
+                                        "scope_links": {
+                                            scope_index: (
+                                                "Invalid object."
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                scope_data = scope_data.copy()
+
+                # Frontend cannot assign child to
+                # another placement.
+                scope_data.pop(
+                    "placement",
+                    None,
+                )
+
+                scope_data["placement"] = placement.pk
+
+                # ------------------------------------------------
+                # Keep child project/professional consistent
+                # with parent placement.
+                # ------------------------------------------------
+
+                scope_data["project"] = (
+                    placement.project_id
+                )
+
+                scope_data["professional"] = (
+                    placement.professional_id
+                )
+
+                scope_serializer = (
+                    ProjectScopeLinkSerializer(
+                        data=scope_data
+                    )
+                )
+
+                if not scope_serializer.is_valid():
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "message": (
+                                "Project scope link "
+                                "validation failed."
+                            ),
+                            "errors": {
+                                "placements": {
+                                    placement_index: {
+                                        "scope_links": {
+                                            scope_index: (
+                                                scope_serializer.errors
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                scope_serializer.save()
+
+            created_ids.append(
+                placement.pk
+            )
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        result = (
+            ProjectPlacement.objects
+            .filter(pk__in=created_ids)
+            .select_related(
+                "project",
+                "professional",
+                "professional_assignment",
+            )
+            .prefetch_related(
+                "scope_links",
+            )
+        )
+
+        serializer = ProjectPlacementCombinedSerializer(
+            result,
+            many=True,
+        )
+
+        response_data = serializer.data
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project placements and scope links "
+                    "created successfully."
+                ),
+                "data": (
+                    response_data[0]
+                    if was_single
+                    else response_data
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectPlacementCombinedRetrieveUpdateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+
+        try:
+            return (
+                ProjectPlacement.objects
+                .select_related(
+                    "project",
+                    "professional",
+                    "professional_assignment",
+                )
+                .prefetch_related(
+                    "scope_links",
+                )
+                .get(pk=pk)
+            )
+
+        except ProjectPlacement.DoesNotExist:
+            return None
+
+    # ========================================================
+    # GET BY ID
+    # ========================================================
+
+    def get(self, request, pk):
+
+        placement = self.get_object(pk)
+
+        if not placement:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Project placement not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProjectPlacementCombinedSerializer(
+            placement
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project placement fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # PUT
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Update Project Placement",
+                value={
+                    "project": 1,
+                    "professional": 2,
+                    "professional_assignment": None,
+                    "assigned_role": "Senior Inspection Engineer",
+                    "deployment_start": "2026-09-23",
+                    "deployment_end": "2027-09-23",
+                    "status": "ACTIVE",
+
+                    "scope_links": {
+
+                        "updated": [
+                            {
+                                "id": 1,
+                                "industry": 1,
+                                "scope_catalog": 10,
+                                "authority_action_code": 20,
+                                "allocation_percent": 80,
+                                "verified_field_days": 35,
+                                "experience_project_scope": None,
+                                "evidence_document": None
+                            }
+                        ],
+
+                        "deleted_ids": [
+                            2
+                        ],
+
+                        "new": [
+                            {
+                                "industry": 1,
+                                "scope_catalog": 15,
+                                "authority_action_code": 21,
+                                "allocation_percent": 20,
+                                "verified_field_days": 10,
+                                "experience_project_scope": None,
+                                "evidence_document": None
+                            }
+                        ]
+                    }
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: ProjectPlacementCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def put(self, request, pk):
+
+        placement = self.get_object(pk)
+
+        if not placement:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Project placement not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data.copy()
+
+        scope_operations = data.pop(
+            "scope_links",
+            {},
+        )
+
+        # Don't allow API PK changes
+        data.pop("id", None)
+        data.pop("public_id", None)
+
+        # ====================================================
+        # VALIDATE SCOPE OPERATIONS
+        # ====================================================
+
+        if scope_operations is None:
+            scope_operations = {}
+
+        if not isinstance(scope_operations, dict):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "scope_links": [
+                            (
+                                "Expected an object containing "
+                                "updated, deleted_ids and new."
+                            )
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_records = scope_operations.get(
+            "updated",
+            [],
+        )
+
+        deleted_ids = scope_operations.get(
+            "deleted_ids",
+            [],
+        )
+
+        new_records = scope_operations.get(
+            "new",
+            [],
+        )
+
+        if not isinstance(updated_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "scope_links.updated": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(deleted_ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "scope_links.deleted_ids": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(new_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "scope_links.new": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # UPDATE PLACEMENT
+        # ====================================================
+
+        placement_serializer = (
+            ProjectPlacementSerializer(
+                placement,
+                data=data,
+                partial=True,
+            )
+        )
+
+        if not placement_serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Project placement validation failed."
+                    ),
+                    "errors": (
+                        placement_serializer.errors
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        placement = placement_serializer.save()
+
+        # ====================================================
+        # A. UPDATE EXISTING SCOPE LINKS
+        # ====================================================
+
+        for index, scope_data in enumerate(
+            updated_records
+        ):
+
+            if not isinstance(scope_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.updated": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_data = scope_data.copy()
+
+            scope_link_id = scope_data.pop(
+                "id",
+                None,
+            )
+
+            if not scope_link_id:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.updated": {
+                                index: {
+                                    "id": [
+                                        "This field is required."
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                scope_link = (
+                    ProjectScopeLink.objects.get(
+                        pk=scope_link_id,
+                        placement=placement,
+                    )
+                )
+
+            except ProjectScopeLink.DoesNotExist:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.updated": {
+                                index: {
+                                    "id": [
+                                        (
+                                            "Project scope link "
+                                            "not found for this "
+                                            "placement."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Cannot move child
+            scope_data.pop(
+                "placement",
+                None,
+            )
+
+            scope_data.pop(
+                "project",
+                None,
+            )
+
+            scope_data.pop(
+                "professional",
+                None,
+            )
+
+            scope_data.pop(
+                "public_id",
+                None,
+            )
+
+            # Keep relationship synchronized
+            scope_data["project"] = (
+                placement.project_id
+            )
+
+            scope_data["professional"] = (
+                placement.professional_id
+            )
+
+            scope_serializer = (
+                ProjectScopeLinkSerializer(
+                    scope_link,
+                    data=scope_data,
+                    partial=True,
+                )
+            )
+
+            if not scope_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.updated": {
+                                index: (
+                                    scope_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_serializer.save()
+
+        # ====================================================
+        # B. DELETE SCOPE LINKS
+        # ====================================================
+
+        if deleted_ids:
+
+            existing_delete_ids = set(
+                ProjectScopeLink.objects
+                .filter(
+                    pk__in=deleted_ids,
+                    placement=placement,
+                )
+                .values_list(
+                    "pk",
+                    flat=True,
+                )
+            )
+
+            requested_delete_ids = set(
+                deleted_ids
+            )
+
+            invalid_delete_ids = (
+                requested_delete_ids
+                - existing_delete_ids
+            )
+
+            if invalid_delete_ids:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.deleted_ids": [
+                                (
+                                    "These IDs do not belong "
+                                    "to this project placement: "
+                                    + ", ".join(
+                                        map(
+                                            str,
+                                            invalid_delete_ids,
+                                        )
+                                    )
+                                )
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ProjectScopeLink.objects.filter(
+                pk__in=deleted_ids,
+                placement=placement,
+            ).delete()
+
+        # ====================================================
+        # C. CREATE NEW SCOPE LINKS
+        # ====================================================
+
+        for index, scope_data in enumerate(
+            new_records
+        ):
+
+            if not isinstance(scope_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.new": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_data = scope_data.copy()
+
+            scope_data.pop(
+                "id",
+                None,
+            )
+
+            scope_data.pop(
+                "public_id",
+                None,
+            )
+
+            scope_data.pop(
+                "placement",
+                None,
+            )
+
+            scope_data.pop(
+                "project",
+                None,
+            )
+
+            scope_data.pop(
+                "professional",
+                None,
+            )
+
+            scope_data["placement"] = (
+                placement.pk
+            )
+
+            scope_data["project"] = (
+                placement.project_id
+            )
+
+            scope_data["professional"] = (
+                placement.professional_id
+            )
+
+            scope_serializer = (
+                ProjectScopeLinkSerializer(
+                    data=scope_data
+                )
+            )
+
+            if not scope_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "scope_links.new": {
+                                index: (
+                                    scope_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scope_serializer.save()
+
+        # ====================================================
+        # IMPORTANT
+        # If project/professional changed on placement,
+        # synchronize ALL existing child links too.
+        # ====================================================
+
+        ProjectScopeLink.objects.filter(
+            placement=placement
+        ).update(
+            project_id=placement.project_id,
+            professional_id=placement.professional_id,
+        )
+
+        # ====================================================
+        # FINAL RESPONSE
+        # ====================================================
+
+        placement = (
+            ProjectPlacement.objects
+            .select_related(
+                "project",
+                "professional",
+                "professional_assignment",
+            )
+            .prefetch_related(
+                "scope_links",
+            )
+            .get(pk=placement.pk)
+        )
+
+        serializer = ProjectPlacementCombinedSerializer(
+            placement
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project placement and scope links "
+                    "updated successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )       
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProjectPlacementCombinedDeleteAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="ProjectPlacementBulkDeleteRequest",
+            fields={
+                "ids": serializers.ListField(
+                    child=serializers.IntegerField(),
+                    allow_empty=False,
+                ),
+            },
+        ),
+        examples=[
+            OpenApiExample(
+                "Delete Project Placements",
+                value={
+                    "ids": [1, 2, 3]
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        ids = request.data.get(
+            "ids",
+            [],
+        )
+
+        if not isinstance(ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "ids must be a list.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one ProjectPlacement "
+                        "ID is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        placements = (
+            ProjectPlacement.objects
+            .filter(pk__in=ids)
+        )
+
+        existing_ids = set(
+            placements.values_list(
+                "pk",
+                flat=True,
+            )
+        )
+
+        requested_ids = set(ids)
+
+        invalid_ids = (
+            requested_ids
+            - existing_ids
+        )
+
+        if invalid_ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "One or more ProjectPlacement "
+                        "records were not found."
+                    ),
+                    "invalid_ids": list(
+                        invalid_ids
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deleted_ids = list(
+            existing_ids
+        )
+
+        placements.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Project placements deleted successfully."
+                ),
+                "data": {
+                    "deleted_ids": deleted_ids,
+                    "deleted_count": len(
+                        deleted_ids
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantSecuritySettingsCombinedListCreateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    # ========================================================
+    # GET ALL
+    # ========================================================
+
+    def get(self, request):
+
+        security_settings = (
+            TenantSecuritySettings.objects
+            .all()
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "ip_restrictions",
+            )
+            .order_by("-id")
+        )
+
+        serializer = (
+            TenantSecuritySettingsCombinedSerializer(
+                security_settings,
+                many=True,
+            )
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant security settings fetched "
+                    "successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # POST
+    # Single / Multiple TenantSecuritySettings
+    # Each can contain multiple TenantIPRestriction
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Create Tenant Security Settings",
+                value={
+                    "tenant": 1,
+                    "mfa_policy": "REQUIRED_FOR_ADMINS",
+                    "sso_status": "DISABLED",
+                    "identity_provider": "",
+                    "session_policy": {
+                        "session_timeout_minutes": 60,
+                        "idle_timeout_minutes": 30
+                    },
+                    "api_access_status": "SANDBOX",
+                    "export_policy": {
+                        "allow_export": True,
+                        "allowed_formats": [
+                            "PDF",
+                            "CSV"
+                        ]
+                    },
+                    "ip_restrictions": [
+                        {
+                            "cidr_range": "203.0.113.0/24"
+                        },
+                        {
+                            "cidr_range": "198.51.100.10/32"
+                        }
+                    ]
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            201: TenantSecuritySettingsCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        payload = request.data
+
+        # Accept single object OR list
+        if isinstance(payload, dict):
+            settings_data = [payload]
+            was_single = True
+
+        elif isinstance(payload, list):
+            settings_data = payload
+            was_single = False
+
+        else:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Payload must be an object or list "
+                        "of tenant security settings."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not settings_data:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one tenant security "
+                        "settings record is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_ids = []
+
+        # ====================================================
+        # LOOP SECURITY SETTINGS
+        # ====================================================
+
+        for settings_index, item in enumerate(
+            settings_data
+        ):
+
+            if not isinstance(item, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "security_settings": {
+                                settings_index: (
+                                    "Invalid security settings "
+                                    "object."
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            item = item.copy()
+
+            ip_restrictions = item.pop(
+                "ip_restrictions",
+                [],
+            )
+
+            # =================================================
+            # VALIDATE CHILD STRUCTURE
+            # =================================================
+
+            if ip_restrictions is None:
+                ip_restrictions = []
+
+            elif isinstance(ip_restrictions, dict):
+                ip_restrictions = [
+                    ip_restrictions
+                ]
+
+            elif not isinstance(
+                ip_restrictions,
+                list,
+            ):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "security_settings": {
+                                settings_index: {
+                                    "ip_restrictions": [
+                                        (
+                                            "Expected an object "
+                                            "or list."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # =================================================
+            # CREATE SECURITY SETTINGS
+            # =================================================
+
+            settings_serializer = (
+                TenantSecuritySettingsSerializer(
+                    data=item
+                )
+            )
+
+            if not settings_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Tenant security settings "
+                            "validation failed."
+                        ),
+                        "errors": {
+                            "security_settings": {
+                                settings_index: (
+                                    settings_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            security_setting = (
+                settings_serializer.save()
+            )
+
+            # =================================================
+            # CREATE IP RESTRICTIONS
+            # =================================================
+
+            for ip_index, ip_data in enumerate(
+                ip_restrictions
+            ):
+
+                if not isinstance(ip_data, dict):
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "security_settings": {
+                                    settings_index: {
+                                        "ip_restrictions": {
+                                            ip_index: (
+                                                "Invalid object."
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                ip_data = ip_data.copy()
+
+                # Frontend cannot assign child
+                # to another parent.
+                ip_data.pop(
+                    "security_settings",
+                    None,
+                )
+
+                ip_data["security_settings"] = (
+                    security_setting.pk
+                )
+
+                ip_serializer = (
+                    TenantIPRestrictionSerializer(
+                        data=ip_data
+                    )
+                )
+
+                if not ip_serializer.is_valid():
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "message": (
+                                "Tenant IP restriction "
+                                "validation failed."
+                            ),
+                            "errors": {
+                                "security_settings": {
+                                    settings_index: {
+                                        "ip_restrictions": {
+                                            ip_index: (
+                                                ip_serializer.errors
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                ip_serializer.save()
+
+            created_ids.append(
+                security_setting.pk
+            )
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        result = (
+            TenantSecuritySettings.objects
+            .filter(pk__in=created_ids)
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "ip_restrictions",
+            )
+        )
+
+        serializer = (
+            TenantSecuritySettingsCombinedSerializer(
+                result,
+                many=True,
+            )
+        )
+
+        response_data = serializer.data
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant security settings and IP "
+                    "restrictions created successfully."
+                ),
+                "data": (
+                    response_data[0]
+                    if was_single
+                    else response_data
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantSecuritySettingsCombinedRetrieveUpdateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+
+        try:
+            return (
+                TenantSecuritySettings.objects
+                .select_related(
+                    "tenant",
+                )
+                .prefetch_related(
+                    "ip_restrictions",
+                )
+                .get(pk=pk)
+            )
+
+        except TenantSecuritySettings.DoesNotExist:
+            return None
+
+    # ========================================================
+    # GET BY ID
+    # ========================================================
+
+    def get(self, request, pk):
+
+        security_setting = self.get_object(pk)
+
+        if not security_setting:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant security settings not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = (
+            TenantSecuritySettingsCombinedSerializer(
+                security_setting
+            )
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant security settings fetched "
+                    "successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # PUT
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Update Tenant Security Settings",
+                value={
+                    "mfa_policy": "REQUIRED_FOR_ALL",
+                    "sso_status": "ACTIVE",
+                    "identity_provider": "Microsoft Entra ID",
+                    "session_policy": {
+                        "session_timeout_minutes": 45,
+                        "idle_timeout_minutes": 20
+                    },
+                    "api_access_status": "PRODUCTION",
+                    "export_policy": {
+                        "allow_export": True,
+                        "allowed_formats": [
+                            "PDF",
+                            "CSV"
+                        ]
+                    },
+                    "ip_restrictions": {
+                        "updated": [
+                            {
+                                "id": 1,
+                                "cidr_range": "203.0.113.0/24"
+                            }
+                        ],
+                        "deleted_ids": [
+                            2
+                        ],
+                        "new": [
+                            {
+                                "cidr_range": "192.0.2.0/24"
+                            }
+                        ]
+                    }
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: TenantSecuritySettingsCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def put(self, request, pk):
+
+        security_setting = self.get_object(pk)
+
+        if not security_setting:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant security settings not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data.copy()
+
+        ip_operations = data.pop(
+            "ip_restrictions",
+            {},
+        )
+
+        # Do not allow PK change
+        data.pop("id", None)
+        data.pop("public_id", None)
+
+        # ====================================================
+        # VALIDATE CHILD OPERATIONS
+        # ====================================================
+
+        if ip_operations is None:
+            ip_operations = {}
+
+        if not isinstance(ip_operations, dict):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "ip_restrictions": [
+                            (
+                                "Expected an object containing "
+                                "updated, deleted_ids and new."
+                            )
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_records = ip_operations.get(
+            "updated",
+            [],
+        )
+
+        deleted_ids = ip_operations.get(
+            "deleted_ids",
+            [],
+        )
+
+        new_records = ip_operations.get(
+            "new",
+            [],
+        )
+
+        if not isinstance(updated_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "ip_restrictions.updated": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(deleted_ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "ip_restrictions.deleted_ids": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(new_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "ip_restrictions.new": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # UPDATE SECURITY SETTINGS
+        # ====================================================
+
+        settings_serializer = (
+            TenantSecuritySettingsSerializer(
+                security_setting,
+                data=data,
+                partial=True,
+            )
+        )
+
+        if not settings_serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant security settings "
+                        "validation failed."
+                    ),
+                    "errors": settings_serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        security_setting = (
+            settings_serializer.save()
+        )
+
+        # ====================================================
+        # A. UPDATE EXISTING IP RESTRICTIONS
+        # ====================================================
+
+        for index, ip_data in enumerate(
+            updated_records
+        ):
+
+            if not isinstance(ip_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.updated": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ip_data = ip_data.copy()
+
+            ip_id = ip_data.pop(
+                "id",
+                None,
+            )
+
+            if not ip_id:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.updated": {
+                                index: {
+                                    "id": [
+                                        "This field is required."
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+
+                ip_restriction = (
+                    TenantIPRestriction.objects.get(
+                        pk=ip_id,
+                        security_settings=security_setting,
+                    )
+                )
+
+            except TenantIPRestriction.DoesNotExist:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.updated": {
+                                index: {
+                                    "id": [
+                                        (
+                                            "IP restriction not "
+                                            "found for these "
+                                            "security settings."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Child cannot move to another parent
+            ip_data.pop(
+                "security_settings",
+                None,
+            )
+
+            ip_data.pop(
+                "public_id",
+                None,
+            )
+
+            ip_serializer = (
+                TenantIPRestrictionSerializer(
+                    ip_restriction,
+                    data=ip_data,
+                    partial=True,
+                )
+            )
+
+            if not ip_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.updated": {
+                                index: (
+                                    ip_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ip_serializer.save()
+
+        # ====================================================
+        # B. DELETE IP RESTRICTIONS
+        # ====================================================
+
+        if deleted_ids:
+
+            existing_delete_ids = set(
+                TenantIPRestriction.objects
+                .filter(
+                    pk__in=deleted_ids,
+                    security_settings=security_setting,
+                )
+                .values_list(
+                    "pk",
+                    flat=True,
+                )
+            )
+
+            requested_delete_ids = set(
+                deleted_ids
+            )
+
+            invalid_delete_ids = (
+                requested_delete_ids
+                - existing_delete_ids
+            )
+
+            if invalid_delete_ids:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.deleted_ids": [
+                                (
+                                    "These IDs do not belong "
+                                    "to these security settings: "
+                                    + ", ".join(
+                                        map(
+                                            str,
+                                            invalid_delete_ids,
+                                        )
+                                    )
+                                )
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            TenantIPRestriction.objects.filter(
+                pk__in=deleted_ids,
+                security_settings=security_setting,
+            ).delete()
+
+        # ====================================================
+        # C. CREATE NEW IP RESTRICTIONS
+        # ====================================================
+
+        for index, ip_data in enumerate(
+            new_records
+        ):
+
+            if not isinstance(ip_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.new": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ip_data = ip_data.copy()
+
+            ip_data.pop(
+                "id",
+                None,
+            )
+
+            ip_data.pop(
+                "public_id",
+                None,
+            )
+
+            ip_data.pop(
+                "security_settings",
+                None,
+            )
+
+            ip_data["security_settings"] = (
+                security_setting.pk
+            )
+
+            ip_serializer = (
+                TenantIPRestrictionSerializer(
+                    data=ip_data
+                )
+            )
+
+            if not ip_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "ip_restrictions.new": {
+                                index: (
+                                    ip_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ip_serializer.save()
+
+        # ====================================================
+        # FINAL RESPONSE
+        # ====================================================
+
+        security_setting = (
+            TenantSecuritySettings.objects
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "ip_restrictions",
+            )
+            .get(pk=security_setting.pk)
+        )
+
+        serializer = (
+            TenantSecuritySettingsCombinedSerializer(
+                security_setting
+            )
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant security settings and IP "
+                    "restrictions updated successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantSecuritySettingsCombinedDeleteAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="TenantSecuritySettingsBulkDeleteRequest",
+            fields={
+                "ids": serializers.ListField(
+                    child=serializers.IntegerField(),
+                    allow_empty=False,
+                ),
+            },
+        ),
+        examples=[
+            OpenApiExample(
+                "Delete Tenant Security Settings",
+                value={
+                    "ids": [1, 2]
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        ids = request.data.get(
+            "ids",
+            [],
+        )
+
+        if not isinstance(ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "ids must be a list.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one security settings "
+                        "ID is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        settings_qs = (
+            TenantSecuritySettings.objects
+            .filter(pk__in=ids)
+        )
+
+        existing_ids = set(
+            settings_qs.values_list(
+                "pk",
+                flat=True,
+            )
+        )
+
+        requested_ids = set(ids)
+
+        invalid_ids = (
+            requested_ids
+            - existing_ids
+        )
+
+        if invalid_ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "One or more TenantSecuritySettings "
+                        "records were not found."
+                    ),
+                    "invalid_ids": list(
+                        invalid_ids
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deleted_ids = list(
+            existing_ids
+        )
+
+        settings_qs.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant security settings and their "
+                    "IP restrictions deleted successfully."
+                ),
+                "data": {
+                    "deleted_ids": deleted_ids,
+                    "deleted_count": len(
+                        deleted_ids
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantWorkflowCombinedListCreateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    # ========================================================
+    # GET ALL
+    # ========================================================
+
+    def get(self, request):
+
+        workflows = (
+            TenantWorkflow.objects
+            .all()
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "steps",
+            )
+            .order_by("-created_at")
+        )
+
+        serializer = TenantWorkflowCombinedSerializer(
+            workflows,
+            many=True,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant workflows fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # POST
+    # Single / Multiple TenantWorkflow
+    # Each workflow can contain multiple steps
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Create Tenant Workflow",
+                value={
+                    "tenant": 1,
+                    "workflow_type": "TENANT_VERIFICATION",
+                    "reference_table": "TenantVerification",
+                    "reference_id": (
+                        "550e8400-e29b-41d4-a716-446655440000"
+                    ),
+                    "status": "IN_PROGRESS",
+                    "steps": [
+                        {
+                            "step_order": 1,
+                            "assigned_role": 1,
+                            "decision": "",
+                            "comments": "",
+                            "actioned_by": None,
+                            "actioned_at": None
+                        },
+                        {
+                            "step_order": 2,
+                            "assigned_role": 2,
+                            "decision": "",
+                            "comments": "",
+                            "actioned_by": None,
+                            "actioned_at": None
+                        }
+                    ]
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            201: TenantWorkflowCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        payload = request.data
+
+        # Accept single object OR list
+        if isinstance(payload, dict):
+
+            workflows_data = [payload]
+            was_single = True
+
+        elif isinstance(payload, list):
+
+            workflows_data = payload
+            was_single = False
+
+        else:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Payload must be an object or list "
+                        "of tenant workflows."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not workflows_data:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one tenant workflow "
+                        "is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_ids = []
+
+        # ====================================================
+        # LOOP WORKFLOWS
+        # ====================================================
+
+        for workflow_index, workflow_data in enumerate(
+            workflows_data
+        ):
+
+            if not isinstance(workflow_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "workflows": {
+                                workflow_index: (
+                                    "Invalid workflow object."
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            workflow_data = workflow_data.copy()
+
+            steps = workflow_data.pop(
+                "steps",
+                [],
+            )
+
+            # =================================================
+            # VALIDATE STEPS STRUCTURE
+            # =================================================
+
+            if steps is None:
+
+                steps = []
+
+            elif isinstance(steps, dict):
+
+                steps = [steps]
+
+            elif not isinstance(steps, list):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "workflows": {
+                                workflow_index: {
+                                    "steps": [
+                                        (
+                                            "Expected an object "
+                                            "or list."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # =================================================
+            # CREATE WORKFLOW
+            # =================================================
+
+            workflow_serializer = TenantWorkflowSerializer(
+                data=workflow_data
+            )
+
+            if not workflow_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Tenant workflow validation "
+                            "failed."
+                        ),
+                        "errors": {
+                            "workflows": {
+                                workflow_index: (
+                                    workflow_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            workflow = workflow_serializer.save()
+
+            # =================================================
+            # CREATE WORKFLOW STEPS
+            # =================================================
+
+            for step_index, step_data in enumerate(
+                steps
+            ):
+
+                if not isinstance(step_data, dict):
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "workflows": {
+                                    workflow_index: {
+                                        "steps": {
+                                            step_index: (
+                                                "Invalid step "
+                                                "object."
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                step_data = step_data.copy()
+
+                # Frontend cannot attach step
+                # to another workflow.
+                step_data.pop(
+                    "workflow",
+                    None,
+                )
+
+                step_data["workflow"] = workflow.pk
+
+                step_serializer = (
+                    TenantWorkflowStepSerializer(
+                        data=step_data
+                    )
+                )
+
+                if not step_serializer.is_valid():
+
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "message": (
+                                "Tenant workflow step "
+                                "validation failed."
+                            ),
+                            "errors": {
+                                "workflows": {
+                                    workflow_index: {
+                                        "steps": {
+                                            step_index: (
+                                                step_serializer.errors
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                step_serializer.save()
+
+            created_ids.append(
+                workflow.pk
+            )
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        result = (
+            TenantWorkflow.objects
+            .filter(pk__in=created_ids)
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "steps",
+            )
+        )
+
+        serializer = TenantWorkflowCombinedSerializer(
+            result,
+            many=True,
+        )
+
+        response_data = serializer.data
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant workflows and steps "
+                    "created successfully."
+                ),
+                "data": (
+                    response_data[0]
+                    if was_single
+                    else response_data
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantWorkflowCombinedRetrieveUpdateAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def get_object(self, pk):
+
+        try:
+
+            return (
+                TenantWorkflow.objects
+                .select_related(
+                    "tenant",
+                )
+                .prefetch_related(
+                    "steps",
+                )
+                .get(pk=pk)
+            )
+
+        except TenantWorkflow.DoesNotExist:
+
+            return None
+
+    # ========================================================
+    # GET BY ID
+    # ========================================================
+
+    def get(self, request, pk):
+
+        workflow = self.get_object(pk)
+
+        if not workflow:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant workflow not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = TenantWorkflowCombinedSerializer(
+            workflow
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant workflow fetched successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ========================================================
+    # PUT
+    # ========================================================
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        examples=[
+            OpenApiExample(
+                "Update Tenant Workflow",
+                value={
+                    "workflow_type": "TENANT_VERIFICATION",
+                    "reference_table": "TenantVerification",
+                    "reference_id": (
+                        "550e8400-e29b-41d4-a716-446655440000"
+                    ),
+                    "status": "IN_PROGRESS",
+
+                    "steps": {
+
+                        "updated": [
+                            {
+                                "id": 1,
+                                "step_order": 1,
+                                "assigned_role": 1,
+                                "decision": "APPROVED",
+                                "comments": (
+                                    "Verification completed."
+                                ),
+                                "actioned_by": 5,
+                                "actioned_at": (
+                                    "2026-09-23T15:00:00Z"
+                                )
+                            }
+                        ],
+
+                        "deleted_ids": [
+                            2
+                        ],
+
+                        "new": [
+                            {
+                                "step_order": 3,
+                                "assigned_role": 3,
+                                "decision": "",
+                                "comments": "",
+                                "actioned_by": None,
+                                "actioned_at": None
+                            }
+                        ]
+                    }
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: TenantWorkflowCombinedSerializer
+        },
+    )
+    @transaction.atomic
+    def put(self, request, pk):
+
+        workflow = self.get_object(pk)
+
+        if not workflow:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant workflow not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data.copy()
+
+        step_operations = data.pop(
+            "steps",
+            {},
+        )
+
+        # Do not allow PK change
+        data.pop(
+            "id",
+            None,
+        )
+
+        data.pop(
+            "public_id",
+            None,
+        )
+
+        # ====================================================
+        # VALIDATE CHILD OPERATIONS
+        # ====================================================
+
+        if step_operations is None:
+
+            step_operations = {}
+
+        if not isinstance(step_operations, dict):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "steps": [
+                            (
+                                "Expected an object containing "
+                                "updated, deleted_ids and new."
+                            )
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_records = step_operations.get(
+            "updated",
+            [],
+        )
+
+        deleted_ids = step_operations.get(
+            "deleted_ids",
+            [],
+        )
+
+        new_records = step_operations.get(
+            "new",
+            [],
+        )
+
+        if not isinstance(updated_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "steps.updated": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(deleted_ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "steps.deleted_ids": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(new_records, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "steps.new": [
+                            "Expected a list."
+                        ]
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ====================================================
+        # UPDATE PARENT WORKFLOW
+        # ====================================================
+
+        workflow_serializer = TenantWorkflowSerializer(
+            workflow,
+            data=data,
+            partial=True,
+        )
+
+        if not workflow_serializer.is_valid():
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Tenant workflow validation failed."
+                    ),
+                    "errors": (
+                        workflow_serializer.errors
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        workflow = workflow_serializer.save()
+
+        # ====================================================
+        # A. UPDATE EXISTING STEPS
+        # ====================================================
+
+        for index, step_data in enumerate(
+            updated_records
+        ):
+
+            if not isinstance(step_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.updated": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            step_data = step_data.copy()
+
+            step_id = step_data.pop(
+                "id",
+                None,
+            )
+
+            if not step_id:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.updated": {
+                                index: {
+                                    "id": [
+                                        "This field is required."
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+
+                workflow_step = (
+                    TenantWorkflowStep.objects.get(
+                        pk=step_id,
+                        workflow=workflow,
+                    )
+                )
+
+            except TenantWorkflowStep.DoesNotExist:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.updated": {
+                                index: {
+                                    "id": [
+                                        (
+                                            "Workflow step not "
+                                            "found for this "
+                                            "workflow."
+                                        )
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Step cannot move to another workflow
+            step_data.pop(
+                "workflow",
+                None,
+            )
+
+            step_data.pop(
+                "public_id",
+                None,
+            )
+
+            step_serializer = (
+                TenantWorkflowStepSerializer(
+                    workflow_step,
+                    data=step_data,
+                    partial=True,
+                )
+            )
+
+            if not step_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.updated": {
+                                index: (
+                                    step_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            step_serializer.save()
+
+        # ====================================================
+        # B. DELETE EXISTING STEPS
+        # ====================================================
+
+        if deleted_ids:
+
+            existing_delete_ids = set(
+                TenantWorkflowStep.objects
+                .filter(
+                    pk__in=deleted_ids,
+                    workflow=workflow,
+                )
+                .values_list(
+                    "pk",
+                    flat=True,
+                )
+            )
+
+            requested_delete_ids = set(
+                deleted_ids
+            )
+
+            invalid_delete_ids = (
+                requested_delete_ids
+                - existing_delete_ids
+            )
+
+            if invalid_delete_ids:
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.deleted_ids": [
+                                (
+                                    "These step IDs do not "
+                                    "belong to this workflow: "
+                                    + ", ".join(
+                                        map(
+                                            str,
+                                            invalid_delete_ids,
+                                        )
+                                    )
+                                )
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            TenantWorkflowStep.objects.filter(
+                pk__in=deleted_ids,
+                workflow=workflow,
+            ).delete()
+
+        # ====================================================
+        # C. CREATE NEW STEPS
+        # ====================================================
+
+        for index, step_data in enumerate(
+            new_records
+        ):
+
+            if not isinstance(step_data, dict):
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.new": {
+                                index: "Invalid object."
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            step_data = step_data.copy()
+
+            step_data.pop(
+                "id",
+                None,
+            )
+
+            step_data.pop(
+                "public_id",
+                None,
+            )
+
+            step_data.pop(
+                "workflow",
+                None,
+            )
+
+            step_data["workflow"] = workflow.pk
+
+            step_serializer = (
+                TenantWorkflowStepSerializer(
+                    data=step_data
+                )
+            )
+
+            if not step_serializer.is_valid():
+
+                transaction.set_rollback(True)
+
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "steps.new": {
+                                index: (
+                                    step_serializer.errors
+                                )
+                            }
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            step_serializer.save()
+
+        # ====================================================
+        # FINAL RESPONSE
+        # ====================================================
+
+        workflow = (
+            TenantWorkflow.objects
+            .select_related(
+                "tenant",
+            )
+            .prefetch_related(
+                "steps",
+            )
+            .get(pk=workflow.pk)
+        )
+
+        serializer = TenantWorkflowCombinedSerializer(
+            workflow
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant workflow and steps "
+                    "updated successfully."
+                ),
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )        
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantWorkflowCombinedDeleteAPIView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="TenantWorkflowBulkDeleteRequest",
+            fields={
+                "ids": serializers.ListField(
+                    child=serializers.IntegerField(),
+                    allow_empty=False,
+                ),
+            },
+        ),
+        examples=[
+            OpenApiExample(
+                "Delete Tenant Workflows",
+                value={
+                    "ids": [1, 2, 3]
+                },
+                request_only=True,
+            )
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+        },
+    )
+    @transaction.atomic
+    def post(self, request):
+
+        ids = request.data.get(
+            "ids",
+            [],
+        )
+
+        if not isinstance(ids, list):
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "ids must be a list."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "At least one TenantWorkflow "
+                        "ID is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        workflows = (
+            TenantWorkflow.objects
+            .filter(pk__in=ids)
+        )
+
+        existing_ids = set(
+            workflows.values_list(
+                "pk",
+                flat=True,
+            )
+        )
+
+        requested_ids = set(ids)
+
+        invalid_ids = (
+            requested_ids
+            - existing_ids
+        )
+
+        if invalid_ids:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "One or more TenantWorkflow "
+                        "records were not found."
+                    ),
+                    "invalid_ids": list(
+                        invalid_ids
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deleted_ids = list(
+            existing_ids
+        )
+
+        # TenantWorkflowStep will be deleted
+        # automatically because of CASCADE.
+        workflows.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "Tenant workflows and their steps "
+                    "deleted successfully."
                 ),
                 "data": {
                     "deleted_ids": deleted_ids,

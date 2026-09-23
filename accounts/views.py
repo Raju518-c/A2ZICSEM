@@ -135,6 +135,7 @@ def _extract_tenant_id_from_request(request):
             return None
     return value
 
+from core.serializers import *
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserTblListCreateAPIView(APIView):
@@ -165,16 +166,373 @@ class UserTblListCreateAPIView(APIView):
             status=status.HTTP_200_OK,
         )
     
-    @extend_schema(request=UserTblSerializer)
+    @extend_schema(request=InvitedUserRegistrationSerializer)
     def post(self, request):
-        serializer = UserTblSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
+
+        # ==================================================
+        # GET INVITATION TOKEN
+        # ==================================================
+
+        invitation_token = request.data.get("invitation_token")
+
+        if not invitation_token:
+
             return Response(
-                {"success": True, "message": "User created successfully.", "data": serializer.data},
-                status=status.HTTP_201_CREATED,
+                {
+                    "success": False,
+                    "message":
+                        "Invitation token is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ==================================================
+        # START TRANSACTION
+        # ==================================================
+
+        with transaction.atomic():
+
+            # ==============================================
+            # GET + LOCK INVITATION
+            # ==============================================
+
+            invite = (
+                TenantRegistrationInvite.objects.select_for_update().select_related(
+                    "tenant",
+                    "role",
+                    "user_rec",
+                ).filter(
+                    invitation_token=invitation_token
+                ).first()
+            )
+
+            # ==============================================
+            # INVALID TOKEN
+            # ==============================================
+
+            if not invite:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message":
+                            "Invalid registration invitation."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # MUST BE USER INVITATION
+            # ==============================================
+
+            if (invite.invitation_type!= TenantRegistrationInvite.InvitationType.USER):
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "This invitation is not valid "
+                            "for user registration."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # ALREADY REGISTERED
+            # ==============================================
+
+            if invite.is_registered:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "This invitation has already "
+                            "been used."
+                        ),
+                        "data": {
+                            "user_id": (
+                                str(invite.user_rec_id)
+                                if invite.user_rec_id
+                                else None
+                            )
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # TENANT REQUIRED
+            # ==============================================
+
+            if not invite.tenant_id:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Tenant is not configured "
+                            "for this invitation."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # ROLE REQUIRED
+            # ==============================================
+
+            if not invite.role_id:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Role is not configured "
+                            "for this invitation."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # ROLE MUST BELONG TO TENANT
+            # ==============================================
+
+            if (invite.role.tenant_id!= invite.tenant_id):
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Invitation role does not belong "
+                            "to the invitation tenant."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # EMAIL
+            # ==============================================
+
+            request_email = request.data.get("email")
+
+            if not request_email:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Email is required."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            request_email = (
+                request_email.strip().lower()
+            )
+
+            invited_email = (
+                invite.email.strip().lower()
+            )
+
+            # ==============================================
+            # EMAIL MUST MATCH INVITATION
+            # ==============================================
+
+            if request_email != invited_email:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Registration email does not "
+                            "match the invited email."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # CHECK EXISTING USER
+            #
+            # IMPORTANT:
+            # Same email may exist in another tenant.
+            # Only selected tenant + email is checked.
+            # ==============================================
+
+            existing_user = (
+                UserTbl.objects.filter(
+                    tenant_id=invite.tenant_id,
+                    email__iexact=request_email
+                ).first()
+            )
+
+            if existing_user:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "A user with this email already "
+                            "exists under this tenant."
+                        ),
+                        "data": {
+                            "user_id": str(
+                                existing_user.id
+                            ),
+                            "tenant_id": str(
+                                invite.tenant_id
+                            ),
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # PREPARE USER PAYLOAD
+            # ==============================================
+
+            user_data = request.data.copy()
+
+            # Token is invitation field, NOT UserTbl field.
+            user_data.pop(
+                "invitation_token",
+                None
+            )
+
+            # Never trust tenant sent by frontend.
+            user_data.pop(
+                "tenant",
+                None
+            )
+
+            # Never trust role sent by frontend.
+            user_data.pop(
+                "role",
+                None
+            )
+
+            # Backend takes tenant from invitation.
+            user_data["tenant"] = (
+                invite.tenant_id
+            )
+
+            # ==============================================
+            # VALIDATE USER
+            # ==============================================
+
+            serializer = UserTblSerializer(
+                data=user_data
+            )
+
+            if not serializer.is_valid():
+
+                return Response(
+                    {
+                        "success": False,
+                        "message":
+                            "User validation failed.",
+                        "errors":
+                            serializer.errors,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ==============================================
+            # CREATE USER
+            # ==============================================
+
+            user = serializer.save()
+
+            # ==============================================
+            # ASSIGN ROLE FROM INVITATION
+            # ==============================================
+
+            user.role.add(
+                invite.role
+            )
+
+            # ==============================================
+            # UPDATE INVITATION
+            # ==============================================
+
+            invite.user_rec = user
+            invite.is_registered = True
+            invite.registered_date_time = (
+                timezone.now()
+            )
+
+            invite.save(
+                update_fields=[
+                    "user_rec",
+                    "is_registered",
+                    "registered_date_time",
+                    "updated_at",
+                ]
+            )
+
+        # ==================================================
+        # RESPONSE
+        # ==================================================
+
+        return Response(
+            {
+                "success": True,
+                "message":
+                    "User registered successfully.",
+
+                "data": {
+                    "user": UserTblSerializer(
+                        user
+                    ).data,
+
+                    "invitation": {
+                        "id": invite.id,
+                        "email": invite.email,
+                        "invitation_type": (
+                            invite.invitation_type
+                        ),
+                        "is_registered": (
+                            invite.is_registered
+                        ),
+                        "registered_date_time": (
+                            invite.registered_date_time
+                        ),
+                    },
+
+                    "tenant": {
+                        "id": str(
+                            invite.tenant_id
+                        ),
+                        "name": (
+                            invite.tenant.name
+                        ),
+                    },
+
+                    "role": {
+                        "id": invite.role_id,
+                        "code": invite.role.code,
+                        "name": invite.role.name,
+                    },
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        
+        
+        
+    # @extend_schema(request=UserTblSerializer)
+    # def post(self, request):
+    #     serializer = UserTblSerializer(data=request.data)
+    #     if serializer.is_valid():
+    #         serializer.save()
+    #         return Response(
+    #             {"success": True, "message": "User created successfully.", "data": serializer.data},
+    #             status=status.HTTP_201_CREATED,
+    #         )
+    #     return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserTblRetrieveUpdateDeleteAPIView(APIView):

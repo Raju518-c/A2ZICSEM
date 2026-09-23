@@ -216,5 +216,18 @@ urlpatterns = [
     path("project-requirements/combined/", ProjectRequirementCombinedListCreateAPIView.as_view(), name="project-requirement-combined-list-create",),
     path("project-requirements/combined/<int:pk>/", ProjectRequirementCombinedRetrieveUpdateAPIView.as_view(), name="project-requirement-combined-detail",),
     path("project-requirements/combined/delete/", ProjectRequirementCombinedDeleteAPIView.as_view(), name="project-requirement-combined-delete",),
-    
+
+    path("project-placements/combined/", ProjectPlacementCombinedListCreateAPIView.as_view(), name="project-placement-combined-list-create",),
+    path("project-placements/combined/<int:pk>/", ProjectPlacementCombinedRetrieveUpdateAPIView.as_view(), name="project-placement-combined-detail",),
+    path("project-placements/combined/delete/",ProjectPlacementCombinedDeleteAPIView.as_view(), name="project-placement-combined-delete",),
+
+    path("tenant-security-settings/combined/", TenantSecuritySettingsCombinedListCreateAPIView.as_view(), name="tenant-security-settings-combined-list-create",),
+    path("tenant-security-settings/combined/<int:pk>/", TenantSecuritySettingsCombinedRetrieveUpdateAPIView.as_view(), name="tenant-security-settings-combined-detail",),
+    path("tenant-security-settings/combined/delete/", TenantSecuritySettingsCombinedDeleteAPIView.as_view(), name="tenant-security-settings-combined-delete",),
+
+    path("tenant-workflows/combined/", TenantWorkflowCombinedListCreateAPIView.as_view(), name="tenant-workflow-combined-list-create",),
+    path("tenant-workflows/combined/<int:pk>/", TenantWorkflowCombinedRetrieveUpdateAPIView.as_view(), name="tenant-workflow-combined-detail",),
+    path("tenant-workflows/combined/delete/", TenantWorkflowCombinedDeleteAPIView.as_view(), name="tenant-workflow-combined-delete",),
+
+
 ]

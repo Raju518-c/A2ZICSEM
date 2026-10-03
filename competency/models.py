@@ -22,7 +22,12 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     system-managed. Level is never assigned from years alone and changes
     require an approved CompetencyAssessment.
     """
-        
+    
+    class Classification(models.TextChoices):
+            UNCLASSIFIED = "UNCLASSIFIED", "Unclassified"
+            CANDIDATE = "CANDIDATE", "Candidate"
+            MENTOR = "MENTOR", "Mentor"            
+            
     class DeployabilityStatus(models.TextChoices):
         DEPLOYABLE = "DEPLOYABLE", "Deployable"
         DEPLOYABLE_WITH_RESTRICTIONS = "DEPLOYABLE_WITH_RESTRICTIONS", "Deployable with restrictions"
@@ -111,6 +116,11 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
     #     default=False,
     #     help_text="Derived from level, authority, valid credentials and compliance.",
     # )
+    current_classification = models.CharField(
+        max_length=20,
+        choices=Classification.choices,
+        default=Classification.CANDIDATE,
+    )
     verification_status = models.CharField(
         max_length=30,
         choices=VerificationStatus.choices,

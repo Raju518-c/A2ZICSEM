@@ -5,7 +5,14 @@ from rest_framework.test import APITestCase
 
 from accounts.models import UserTbl, roles
 from catalog.models import ReferenceValue
-from .models import Tenant, TenantOperation
+from .models import (
+    Project,
+    ProjectRequirement,
+    ProjectRequirementScope,
+    Tenant,
+    TenantOperation,
+)
+from catalog.models import ScopeCatalog
 
 
 class TenantCombinedCreateAPIViewTests(APITestCase):
@@ -85,4 +92,81 @@ class TenantCombinedCreateAPIViewTests(APITestCase):
         self.assertTrue(admin_user.role.exists())
         self.assertEqual(admin_user.role.first().code, "Admin")
         self.assertEqual(tenant.created_by, admin_user)
+
+
+class ProjectRequirementCombinedUpdateTests(APITestCase):
+    def test_put_skips_existing_scope_and_creates_new_scope(self):
+        creator = UserTbl.objects.create(
+            email="project-creator@example.com",
+            mobile_country_code="+1",
+            mobile_number="2222222222",
+            password="CreatorPass123",
+        )
+        tenant = Tenant.objects.create(name="Project Tenant")
+        industry = ReferenceValue.objects.create(
+            code="TEST_INDUSTRY",
+            label="Test industry",
+            created_by=creator,
+        )
+        role = ReferenceValue.objects.create(
+            code="TEST_ROLE",
+            label="Test role",
+            created_by=creator,
+        )
+        existing_scope = ScopeCatalog.objects.create(
+            code="TEST-SCOPE-1",
+            industry=industry,
+            scope_name="Existing scope",
+            created_by=creator,
+        )
+        new_scope = ScopeCatalog.objects.create(
+            code="TEST-SCOPE-2",
+            industry=industry,
+            scope_name="New scope",
+            created_by=creator,
+        )
+        project = Project.objects.create(
+            tenant=tenant,
+            project_code="TEST-PROJECT",
+            project_name="Test project",
+            country_code="US",
+        )
+        requirement = ProjectRequirement.objects.create(
+            project=project,
+            role_code=role,
+            required_count=1,
+        )
+        ProjectRequirementScope.objects.create(
+            requirement=requirement,
+            scope_catalog=existing_scope,
+        )
+
+        response = self.client.put(
+            reverse(
+                "tenancy:project-requirement-combined-detail",
+                args=[requirement.pk],
+            ),
+            {
+                "required_count": 10,
+                "requirement_scopes": {
+                    "updated": [],
+                    "deleted_ids": [],
+                    "new": [
+                        {"scope_catalog": existing_scope.pk},
+                        {"scope_catalog": new_scope.pk},
+                    ],
+                },
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            set(
+                ProjectRequirementScope.objects
+                .filter(requirement=requirement)
+                .values_list("scope_catalog_id", flat=True)
+            ),
+            {existing_scope.pk, new_scope.pk},
+        )
         

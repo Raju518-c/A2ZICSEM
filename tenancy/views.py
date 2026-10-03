@@ -7963,6 +7963,12 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(APIView):
         # C. CREATE NEW SCOPES
         # ====================================================
 
+        existing_scope_catalog_ids = set(
+            ProjectRequirementScope.objects
+            .filter(requirement=requirement)
+            .values_list("scope_catalog_id", flat=True)
+        )
+
         for index, scope_data in enumerate(
             new_records
         ):
@@ -7995,6 +8001,17 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(APIView):
                 None,
             )
 
+            scope_catalog_id = scope_data.get("scope_catalog")
+            if isinstance(scope_catalog_id, str) and scope_catalog_id.isdecimal():
+                scope_catalog_id = int(scope_catalog_id)
+
+            if (
+                isinstance(scope_catalog_id, int)
+                and not isinstance(scope_catalog_id, bool)
+                and scope_catalog_id in existing_scope_catalog_ids
+            ):
+                continue
+
             scope_data["requirement"] = (
                 requirement.pk
             )
@@ -8023,7 +8040,8 @@ class ProjectRequirementCombinedRetrieveUpdateAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            scope_serializer.save()
+            created_scope = scope_serializer.save()
+            existing_scope_catalog_ids.add(created_scope.scope_catalog_id)
 
         # ====================================================
         # FINAL RESPONSE

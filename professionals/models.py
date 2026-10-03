@@ -107,12 +107,12 @@ class ProfessionalProfile(UUIDModel, TenantOwnedModel, TimeStampedModel):
         db_index=True,
         help_text="Current profile workflow status.",
     )
-    current_classification = models.CharField(
-        max_length=20,
-        choices=Classification.choices,
-        default=Classification.UNCLASSIFIED,
-        help_text="Current professional classification.",
-    )
+    # current_classification = models.CharField(
+    #     max_length=20,
+    #     choices=Classification.choices,
+    #     default=Classification.UNCLASSIFIED,
+    #     help_text="Current professional classification.",
+    # )
     classification_status = models.CharField(
         max_length=30,
         choices=ClassificationStatus.choices,

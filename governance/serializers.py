@@ -42,6 +42,46 @@ class CalculationRuleSetSerializer(serializers.ModelSerializer):
         )
 
 
+
+
+
+class QualionLevelConditionSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = QualionLevelCondition
+        fields = "__all__"
+
+
+class CalculationRuleCombinedSerializer(serializers.ModelSerializer):
+
+    qualion_level_conditions = QualionLevelConditionSerializer(
+        many=True,
+        read_only=True
+    )
+
+    new_conditions = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False
+    )
+
+    update_conditions = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False
+    )
+
+    delete_conditions = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = CalculationRule
+        fields = "__all__"
+        
+        
 class CalculationRuleSerializer(serializers.ModelSerializer):
 
     class Meta:

@@ -908,348 +908,846 @@ class CalculationRuleSet(UUIDModel, TenantOwnedModel, TimeStampedModel):
 #         return f"{self.rule_set} — #{self.sequence} {self.label}"
 
 
+# class CalculationRule(TenantOwnedModel, TimeStampedModel):
+#     """One threshold rule for one of the 3 genuinely rule-driven system-
+#     calculated fields (QUALION_LEVEL, DEPLOYABILITY_FLAG,
+#     CANDIDATE_MENTOR_CLASSIFICATION) — fixed, typed condition columns
+#     plus the concluded value, with calculation_field_code and scope
+#     directly on the row instead of via a CalculationRuleSet wrapper.
+
+#     Trade-off accepted by collapsing CalculationRuleSet into this table:
+#     there is no DRAFT/PUBLISHED staging, no version number, and no
+#     supersedes chain — editing a rule (or its is_active flag) takes
+#     effect immediately, and once changed there's no record of what the
+#     row looked like before. If you need to stage a threshold change for
+#     review before it goes live, or need to answer "what was L3's
+#     threshold last quarter," that requires CalculationRuleSet back.
+
+#     Key rule: for one tenant+calculation_field_code+scope combination,
+#     rules are evaluated in `sequence` order; the first rule whose
+#     populated conditions are satisfied by the professional's actual
+#     parameters (per match_type) wins.
+#     """
+
+#     class MatchType(models.TextChoices):
+#         ALL_CONDITIONS = "ALL_CONDITIONS", "All conditions must be met"
+#         ANY_CONDITION = "ANY_CONDITION", "Any one condition is sufficient"
+
+#     class AssessmentDecision(models.TextChoices):
+#         """Mirrors competency.CompetencyAssessment.Decision — duplicated
+#         rather than imported cross-app; keep in sync if either changes."""
+
+#         DRAFT = "DRAFT", "Draft"
+#         SUBMITTED = "SUBMITTED", "Submitted"
+#         APPROVED = "APPROVED", "Approved"
+#         REJECTED = "REJECTED", "Rejected"
+
+#     class DeployabilityStatus(models.TextChoices):
+#         """Mirrors competency.ProfessionalScope.DeployabilityStatus —
+#         duplicated rather than imported cross-app; keep in sync."""
+
+#         DEPLOYABLE = "DEPLOYABLE", "Deployable"
+#         DEPLOYABLE_WITH_RESTRICTIONS = "DEPLOYABLE_WITH_RESTRICTIONS", "Deployable with restrictions"
+#         REVIEW_REQUIRED = "REVIEW_REQUIRED", "Review required"
+#         NOT_DEPLOYABLE = "NOT_DEPLOYABLE", "Not deployable"
+
+#     class Classification(models.TextChoices):
+#         """BOTH is a valid system recommendation here, but
+#         ProfessionalReview.final_classification only ever accepts
+#         CANDIDATE or MENTOR once a human confirms."""
+
+#         CANDIDATE = "CANDIDATE", "Candidate"
+#         MENTOR = "MENTOR", "Mentor"
+#         BOTH = "BOTH", "Both"
+#         UNCLASSIFIED = "UNCLASSIFIED", "Unclassified"
+
+#     # The only 3 valid values — enforced in clean(), see below.
+#     calculation_field_choices = [
+#         ('QUALION_LEVEL', 'QUALION_LEVEL'),
+#         ('DEPLOYABILITY_FLAG', 'DEPLOYABILITY_FLAG'),
+#         ('CANDIDATE_MENTOR_CLASSIFICATION', 'CANDIDATE_MENTOR_CLASSIFICATION'),
+#     ]
+
+#     RULE_DRIVEN_FIELD_CODES = {
+#         "QUALION_LEVEL",
+#         "DEPLOYABILITY_FLAG",
+#         "CANDIDATE_MENTOR_CLASSIFICATION",
+#     }
+
+#     calculation_field_code = models.CharField(
+#         max_length=40,
+#         choices=calculation_field_choices,
+#         db_index=True,
+#         null=True, blank=True,
+#         help_text="Which system-calculated field this rule belongs to. "
+#         "Only QUALION_LEVEL, DEPLOYABILITY_FLAG and "
+#         "CANDIDATE_MENTOR_CLASSIFICATION are valid here — the other 12 "
+#         "fields are fixed formulas and never have a CalculationRule; "
+#         "enforced in clean().",
+#     )
+#     scope = models.ManyToManyField(
+#         "catalog.ScopeCatalog",
+#         blank=True,
+#         related_name="calculation_rules",
+#         help_text=(
+#             "Industry/Scopes this rule applies to. "
+#             "An empty selection means tenant-wide "
+#             "(e.g. CANDIDATE_MENTOR_CLASSIFICATION is typically evaluated "
+#             "across a professional's best scope, not one specific scope). "
+#             "At least one scope is expected for QUALION_LEVEL and "
+#             "DEPLOYABILITY_FLAG."
+#         ),
+#     )
+#     sequence = models.PositiveSmallIntegerField(
+#         help_text="Evaluation order within this tenant+field+scope ladder; "
+#         "lower runs first. First matching rule wins."
+#     )
+#     label = models.CharField(
+#         max_length=160,
+#         help_text="Admin-facing description, e.g. 'Level 4 — Independent authority'.",
+#     )
+#     match_type = models.CharField(
+#         max_length=20,
+#         choices=MatchType.choices,
+#         default=MatchType.ALL_CONDITIONS,
+#         help_text="Whether every populated condition, or any single one, "
+#         "triggers this rule.",
+#     )
+
+#     # ------------------------------------------------------------------
+#     # Conditions — fixed, typed thresholds instead of a JSON blob. Each
+#     # is nullable/independent: leave one blank to exclude it from this
+#     # rule entirely.
+#     # ------------------------------------------------------------------
+#     #QUALION_LEVEL field
+#     min_calendar_experience_months = models.PositiveIntegerField(
+#         null=True,
+#         blank=True,
+#         help_text="Minimum ProfessionalScope.calendar_experience_months "
+#         "for this scope.",
+#     )
+#     max_calendar_experience_months = models.PositiveIntegerField(
+#         null=True,
+#         blank=True,
+#         help_text="Maximum ProfessionalScope.calendar_experience_months "
+#         "for this scope.",
+#     )
+#     #QUALION_LEVEL field
+#     min_verified_field_days = models.DecimalField(
+#         max_digits=8,
+#         decimal_places=2,
+#         null=True,
+#         blank=True,
+#         help_text="Minimum ProfessionalScope.verified_field_days for this scope.",
+#     )
+#     max_verified_field_days = models.DecimalField(
+#         max_digits=8,
+#         decimal_places=2,
+#         null=True,
+#         blank=True,
+#         help_text="Maximum ProfessionalScope.verified_field_days for this scope.",
+#     )
+#     #QUALION_LEVEL field
+#     min_verified_project_count = models.PositiveIntegerField(
+#         null=True,
+#         blank=True,
+#         help_text="Minimum ProfessionalScope.verified_project_count "
+#         "(approved/verified projects) for this scope.",
+#     )
+#     max_verified_project_count = models.PositiveIntegerField(
+#         null=True,
+#         blank=True,
+#         help_text="Maximum ProfessionalScope.verified_project_count "
+#         "(approved/verified projects) for this scope.",
+#     )
+#     #DEPLOYABILITY_FLAG and CANDIDATE_MENTOR_CLASSIFICATION fields
+#     min_qualion_level = models.ForeignKey(
+#         "catalog.ReferenceValue",
+#         on_delete=models.PROTECT,
+#         null=True,
+#         blank=True,
+#         related_name="calc_rules_min_qualion_level",
+#         help_text="Minimum current_qualion_level rank required, ranked by "
+#         "ReferenceValue.sort_order (option_set QUALION_LEVEL). Used by "
+#         "DEPLOYABILITY_FLAG/CANDIDATE_MENTOR_CLASSIFICATION rules — not "
+#         "QUALION_LEVEL rules themselves, which would be circular.",
+#     )
+#     max_qualion_level = models.ForeignKey(
+#         "catalog.ReferenceValue",
+#         on_delete=models.PROTECT,
+#         null=True,
+#         blank=True,
+#         related_name="calc_rules_max_qualion_level",
+#         help_text="Maximum current_qualion_level rank required, ranked by "
+#         "ReferenceValue.sort_order (option_set QUALION_LEVEL). Used by "
+#         "DEPLOYABILITY_FLAG/CANDIDATE_MENTOR_CLASSIFICATION rules — not "
+#         "QUALION_LEVEL rules themselves, which would be circular.",
+#     )
+#     #All 3 fields
+#     min_authority_status = models.ForeignKey(
+#         "catalog.ReferenceValue",
+#         on_delete=models.PROTECT,
+#         null=True,
+#         blank=True,
+#         related_name="calc_rules_min_authority_status",
+#         help_text="Minimum current_authority_status rank required, ranked "
+#         "by sort_order (option_set AUTHORITY_STATUS).",
+#     )
+#     #QUALION_LEVEL field
+#     min_complexity_rating = models.ForeignKey(
+#         "catalog.ReferenceValue",
+#         on_delete=models.PROTECT,
+#         null=True,
+#         blank=True,
+#         related_name="calc_rules_min_complexity_rating",
+#         help_text="Minimum complexity_rating rank required, ranked by "
+#         "sort_order (option_set COMPLEXITY).",
+#     )
+#     #CANDIDATE_MENTOR_CLASSIFICATION field
+#     min_ethics_independence_score = models.DecimalField(
+#         max_digits=5,
+#         decimal_places=2,
+#         null=True,
+#         blank=True,
+#         help_text="Minimum latest CompetencyAssessment."
+#         "ethics_independence_score (0.00-100.00). "
+#         "CANDIDATE_MENTOR_CLASSIFICATION rules only.",
+#     )
+#     #CANDIDATE_MENTOR_CLASSIFICATION field
+#     require_latest_assessment_decision = models.CharField(
+#         max_length=20,
+#         blank=True,
+#         choices=AssessmentDecision.choices,
+#         help_text="The latest CompetencyAssessment for this professional+"
+#         "scope must have this decision (e.g. APPROVED) for the rule to "
+#         "match. Blank = not checked.",
+#     )
+#     #QUALION_LEVEL and DEPLOYABILITY_FLAG fields
+#     required_credential_types = models.ManyToManyField(
+#         "catalog.ReferenceValue",
+#         blank=True,
+#         related_name="calc_rules_requiring_credential",
+#         help_text="Professional must hold a CredentialRecord of at least "
+#         "one of these types (option_set CREDENTIAL_TYPE) for this scope. "
+#         "Empty = no credential required by this rule.",
+#     )
+#     #QUALION_LEVEL and DEPLOYABILITY_FLAG fields
+#     require_active_credential = models.BooleanField(
+#         default=False,
+#         help_text="Only meaningful when required_credential_types is set: "
+#         "whether the matching credential must currently be status=ACTIVE, "
+#         "vs. any status.",
+#     )
+#     #DEPLOYABILITY_FLAG 
+#     max_days_to_credential_expiry = models.PositiveSmallIntegerField(
+#         null=True,
+#         blank=True,
+#         help_text="Only meaningful when required_credential_types is set: "
+#         "the matching credential must expire within this many days "
+#         "(e.g. 30) — used for 'expiring soon' deployability rules. Leave "
+#         "blank to not check expiry at all.",
+#     )
+#     #CANDIDATE_MENTOR_CLASSIFICATION field
+#     block_if_pending_rejection = models.BooleanField(
+#         default=False,
+#         help_text="If true, this rule does not match while the professional "
+#         "has an unresolved REJECTED ProfessionalReview of type "
+#         "RECLASSIFICATION. CANDIDATE_MENTOR_CLASSIFICATION rules only.",
+#     )
+
+#     # ------------------------------------------------------------------
+#     # Concluded value — exactly one populated, matching
+#     # calculation_field_code; enforced in clean().
+#     # ------------------------------------------------------------------
+#     #QUALION_LEVEL field
+#     concluded_qualion_level = models.ForeignKey(
+#         "catalog.ReferenceValue",
+#         on_delete=models.PROTECT,
+#         null=True,
+#         blank=True,
+#         related_name="calc_rules_concluded_qualion_level",
+#         help_text="Value assigned when this rule matches. QUALION_LEVEL "
+#         "rules only (option_set QUALION_LEVEL).",
+#     )
+#     #DEPLOYABILITY_FLAG field
+#     concluded_deployability_status = models.CharField(
+#         max_length=30,
+#         blank=True,
+#         choices=DeployabilityStatus.choices,
+#         help_text="Value assigned when this rule matches. DEPLOYABILITY_FLAG "
+#         "rules only.",
+#     )
+#     #CANDIDATE_MENTOR_CLASSIFICATION field
+#     concluded_classification = models.CharField(
+#         max_length=20,
+#         blank=True,
+#         choices=Classification.choices,
+#         help_text="Value assigned when this rule matches. "
+#         "CANDIDATE_MENTOR_CLASSIFICATION rules only.",
+#     )
+#     #All 3 fields: overrides rule_set.default_requires_human_confirmation for this specific concluded value; set true for L4/L5 and other high-impact outcomes per QUALION_QP-10, requiring reviewer and approver to be different authorised individuals.
+#     requires_four_eyes_approval = models.BooleanField(
+#         default=False,
+#         help_text="Set true for L4/L5 and other high-impact outcomes per "
+#         "QUALION_QP-10, requiring reviewer and approver to be different "
+#         "authorised individuals.",
+#     )
+#     is_active = models.BooleanField(
+#         default=True,
+#         help_text="Disable a single rule without deleting it. Takes effect "
+#         "immediately — there is no DRAFT/PUBLISHED staging here.",
+#     )
+#     created_by = models.ForeignKey(
+#         "accounts.UserTbl",
+#         on_delete=models.PROTECT, null=True, blank=True,
+#         related_name="calculation_rules_created",
+#         help_text="Tenant Admin/authorised author who created this rule.",
+#     )
+
+#     class Meta:
+#         db_table = "governance_calculation_rule"
+#         verbose_name = "CalculationRule"
+#         verbose_name_plural = "CalculationRule"
+#         ordering = ["calculation_field_code", "sequence"]
+
+#     def clean(self):
+#         super().clean()
+#         if self.calculation_field_code not in self.RULE_DRIVEN_FIELD_CODES:
+#             raise ValidationError({
+#                 "calculation_field_code": f"{self.calculation_field_code} is "
+#                 "not one of the 3 rule-driven fields (QUALION_LEVEL, "
+#                 "DEPLOYABILITY_FLAG, CANDIDATE_MENTOR_CLASSIFICATION) — it's "
+#                 "a fixed formula and should never have a CalculationRule."
+#             })
+
+#         concluded_field_for_code = {
+#             CalculatedFieldCode.QUALION_LEVEL: "concluded_qualion_level_id",
+#             CalculatedFieldCode.DEPLOYABILITY_FLAG: "concluded_deployability_status",
+#             CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION: "concluded_classification",
+#         }
+#         expected_field = concluded_field_for_code[self.calculation_field_code]
+#         if not getattr(self, expected_field):
+#             raise ValidationError({
+#                 expected_field: f"Required for a {self.calculation_field_code} rule."
+#             })
+#         for other_field in concluded_field_for_code.values():
+#             if other_field != expected_field and getattr(self, other_field):
+#                 raise ValidationError({
+#                     other_field: f"Not applicable to a {self.calculation_field_code} "
+#                     f"rule — only {expected_field} should be set."
+#                 })
+
+#     def __str__(self):
+#         if self.pk:
+#             scopes = self.scope.all()
+#             scope_label = ", ".join(str(scope) for scope in scopes) or "tenant-wide"
+#         else:
+#             scope_label = "tenant-wide"
+
+#         return (
+#             f"{self.tenant} — "
+#             f"{self.calculation_field_code} — "
+#             f"{scope_label} — "
+#             f"#{self.sequence} {self.label}"
+#         )        
+
+
+
+
+
 class CalculationRule(TenantOwnedModel, TimeStampedModel):
-    """One threshold rule for one of the 3 genuinely rule-driven system-
-    calculated fields (QUALION_LEVEL, DEPLOYABILITY_FLAG,
-    CANDIDATE_MENTOR_CLASSIFICATION) — fixed, typed condition columns
-    plus the concluded value, with calculation_field_code and scope
-    directly on the row instead of via a CalculationRuleSet wrapper.
-
-    Trade-off accepted by collapsing CalculationRuleSet into this table:
-    there is no DRAFT/PUBLISHED staging, no version number, and no
-    supersedes chain — editing a rule (or its is_active flag) takes
-    effect immediately, and once changed there's no record of what the
-    row looked like before. If you need to stage a threshold change for
-    review before it goes live, or need to answer "what was L3's
-    threshold last quarter," that requires CalculationRuleSet back.
-
-    Key rule: for one tenant+calculation_field_code+scope combination,
-    rules are evaluated in `sequence` order; the first rule whose
-    populated conditions are satisfied by the professional's actual
-    parameters (per match_type) wins.
     """
+    Parent configuration for the 3 rule-driven calculated fields.
+
+    One rule can apply to multiple scopes.
+
+    QUALION_LEVEL:
+        Detailed L5 -> L0 conditions are stored in QualionLevelCondition.
+
+    DEPLOYABILITY_FLAG:
+        This row stores only conditions required for DEPLOYABLE.
+        Conditions pass  -> DEPLOYABLE
+        Conditions fail  -> NOT_DEPLOYABLE
+
+    CANDIDATE_MENTOR_CLASSIFICATION:
+        This row stores only conditions required for MENTOR.
+        Conditions pass  -> MENTOR
+        Conditions fail  -> CANDIDATE
+    """
+
+    class CalculationField(models.TextChoices):
+        QUALION_LEVEL = "QUALION_LEVEL", "Qualion Level"
+        DEPLOYABILITY_FLAG = "DEPLOYABILITY_FLAG", "Deployability Flag"
+        CANDIDATE_MENTOR_CLASSIFICATION = (
+            "CANDIDATE_MENTOR_CLASSIFICATION",
+            "Candidate / Mentor Classification",
+        )
 
     class MatchType(models.TextChoices):
         ALL_CONDITIONS = "ALL_CONDITIONS", "All conditions must be met"
         ANY_CONDITION = "ANY_CONDITION", "Any one condition is sufficient"
 
     class AssessmentDecision(models.TextChoices):
-        """Mirrors competency.CompetencyAssessment.Decision — duplicated
-        rather than imported cross-app; keep in sync if either changes."""
-
         DRAFT = "DRAFT", "Draft"
         SUBMITTED = "SUBMITTED", "Submitted"
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
 
-    class DeployabilityStatus(models.TextChoices):
-        """Mirrors competency.ProfessionalScope.DeployabilityStatus —
-        duplicated rather than imported cross-app; keep in sync."""
-
-        DEPLOYABLE = "DEPLOYABLE", "Deployable"
-        DEPLOYABLE_WITH_RESTRICTIONS = "DEPLOYABLE_WITH_RESTRICTIONS", "Deployable with restrictions"
-        REVIEW_REQUIRED = "REVIEW_REQUIRED", "Review required"
-        NOT_DEPLOYABLE = "NOT_DEPLOYABLE", "Not deployable"
-
-    class Classification(models.TextChoices):
-        """BOTH is a valid system recommendation here, but
-        ProfessionalReview.final_classification only ever accepts
-        CANDIDATE or MENTOR once a human confirms."""
-
-        CANDIDATE = "CANDIDATE", "Candidate"
-        MENTOR = "MENTOR", "Mentor"
-        BOTH = "BOTH", "Both"
-        UNCLASSIFIED = "UNCLASSIFIED", "Unclassified"
-
-    # The only 3 valid values — enforced in clean(), see below.
-    calculation_field_choices = [
-        ('QUALION_LEVEL', 'QUALION_LEVEL'),
-        ('DEPLOYABILITY_FLAG', 'DEPLOYABILITY_FLAG'),
-        ('CANDIDATE_MENTOR_CLASSIFICATION', 'CANDIDATE_MENTOR_CLASSIFICATION'),
-    ]
-
-    RULE_DRIVEN_FIELD_CODES = {
-        "QUALION_LEVEL",
-        "DEPLOYABILITY_FLAG",
-        "CANDIDATE_MENTOR_CLASSIFICATION",
-    }
-
     calculation_field_code = models.CharField(
-        max_length=40,
-        choices=calculation_field_choices,
-        db_index=True,
-        null=True, blank=True,
-        help_text="Which system-calculated field this rule belongs to. "
-        "Only QUALION_LEVEL, DEPLOYABILITY_FLAG and "
-        "CANDIDATE_MENTOR_CLASSIFICATION are valid here — the other 12 "
-        "fields are fixed formulas and never have a CalculationRule; "
-        "enforced in clean().",
+        max_length=50,
+        choices=CalculationField.choices,
+        db_index=True, null=True, blank=True,
+        help_text="Rule-driven calculated field controlled by this configuration.",
     )
-    scope = models.ManyToManyField(
-        "catalog.ScopeCatalog",
-        blank=True,
-        related_name="calculation_rules",
+
+    industry = models.ManyToManyField(
+        "catalog.ReferenceValue",
+        blank=True, null=True,
+        related_name="industry_calculation_rules",
+        limit_choices_to={
+            "option_set__option_type": "INDUSTRY",
+        },
         help_text=(
-            "Industry/Scopes this rule applies to. "
-            "An empty selection means tenant-wide "
-            "(e.g. CANDIDATE_MENTOR_CLASSIFICATION is typically evaluated "
-            "across a professional's best scope, not one specific scope). "
-            "At least one scope is expected for QUALION_LEVEL and "
-            "DEPLOYABILITY_FLAG."
+            "Industries to which this rule applies. "
+            "When industries are selected, the rule automatically applies "
+            "to every scope belonging to those industries. "
+            "Industry and Scope cannot both be selected."
         ),
     )
-    sequence = models.PositiveSmallIntegerField(
-        help_text="Evaluation order within this tenant+field+scope ladder; "
-        "lower runs first. First matching rule wins."
+
+    scope = models.ManyToManyField(
+        "catalog.ScopeCatalog",
+        related_name="calculation_rules", null=True, blank=True,
+        help_text=(
+            "Scopes to which this rule applies. "
+            "The same configuration may be applied to multiple scopes."
+        ),
     )
+
     label = models.CharField(
-        max_length=160,
-        help_text="Admin-facing description, e.g. 'Level 4 — Independent authority'.",
+        max_length=160, null=True, blank=True,
+        help_text="Admin-facing name for this rule configuration.",
     )
+
     match_type = models.CharField(
         max_length=20,
         choices=MatchType.choices,
         default=MatchType.ALL_CONDITIONS,
-        help_text="Whether every populated condition, or any single one, "
-        "triggers this rule.",
+        help_text=(
+            "ALL_CONDITIONS means every populated condition must pass. "
+            "ANY_CONDITION means at least one populated condition must pass."
+        ),
     )
 
-    # ------------------------------------------------------------------
-    # Conditions — fixed, typed thresholds instead of a JSON blob. Each
-    # is nullable/independent: leave one blank to exclude it from this
-    # rule entirely.
-    # ------------------------------------------------------------------
-    #QUALION_LEVEL field
-    min_calendar_experience_months = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Minimum ProfessionalScope.calendar_experience_months "
-        "for this scope.",
-    )
-    max_calendar_experience_months = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Maximum ProfessionalScope.calendar_experience_months "
-        "for this scope.",
-    )
-    #QUALION_LEVEL field
-    min_verified_field_days = models.DecimalField(
-        max_digits=8,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text="Minimum ProfessionalScope.verified_field_days for this scope.",
-    )
-    max_verified_field_days = models.DecimalField(
-        max_digits=8,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text="Maximum ProfessionalScope.verified_field_days for this scope.",
-    )
-    #QUALION_LEVEL field
-    min_verified_project_count = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Minimum ProfessionalScope.verified_project_count "
-        "(approved/verified projects) for this scope.",
-    )
-    max_verified_project_count = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Maximum ProfessionalScope.verified_project_count "
-        "(approved/verified projects) for this scope.",
-    )
-    #DEPLOYABILITY_FLAG and CANDIDATE_MENTOR_CLASSIFICATION fields
+    # ============================================================
+    # DEPLOYABILITY + CLASSIFICATION CONDITIONS
+    # ============================================================
+
     min_qualion_level = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="calc_rules_min_qualion_level",
-        help_text="Minimum current_qualion_level rank required, ranked by "
-        "ReferenceValue.sort_order (option_set QUALION_LEVEL). Used by "
-        "DEPLOYABILITY_FLAG/CANDIDATE_MENTOR_CLASSIFICATION rules — not "
-        "QUALION_LEVEL rules themselves, which would be circular.",
+        null=True, blank=True,
+        related_name="calculation_rules_min_qualion_level",
+        help_text=(
+            "Minimum Qualion level required. "
+            "Used by Deployability and Candidate/Mentor Classification."
+        ),
     )
-    max_qualion_level = models.ForeignKey(
-        "catalog.ReferenceValue",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="calc_rules_max_qualion_level",
-        help_text="Maximum current_qualion_level rank required, ranked by "
-        "ReferenceValue.sort_order (option_set QUALION_LEVEL). Used by "
-        "DEPLOYABILITY_FLAG/CANDIDATE_MENTOR_CLASSIFICATION rules — not "
-        "QUALION_LEVEL rules themselves, which would be circular.",
-    )
-    #All 3 fields
+
     min_authority_status = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name="calc_rules_min_authority_status",
-        help_text="Minimum current_authority_status rank required, ranked "
-        "by sort_order (option_set AUTHORITY_STATUS).",
+        related_name="calculation_rules_min_authority_status",
+        help_text=(
+            "Minimum authority status required. "
+            "Used by Deployability and Candidate/Mentor Classification."
+        ),
     )
-    #QUALION_LEVEL field
-    min_complexity_rating = models.ForeignKey(
+
+    # ============================================================
+    # DEPLOYABILITY CONDITIONS
+    # ============================================================
+
+    required_credential_types = models.ManyToManyField(
         "catalog.ReferenceValue",
-        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name="calculation_rules_required_credentials",
+        help_text=(
+            "Credential types required for deployability. "
+            "Empty means credential type is not checked."
+        ),
+    )
+
+    require_active_credential = models.BooleanField(
+        default=False,
+        null=True, blank=True,
+        help_text=(
+            "If enabled, at least one matching required credential "
+            "must be active."
+        ),
+    )
+
+    max_days_to_credential_expiry = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
-        related_name="calc_rules_min_complexity_rating",
-        help_text="Minimum complexity_rating rank required, ranked by "
-        "sort_order (option_set COMPLEXITY).",
+        help_text=(
+            "Optional credential expiry condition used by deployability."
+        ),
     )
-    #CANDIDATE_MENTOR_CLASSIFICATION field
+
+    # ============================================================
+    # MENTOR CLASSIFICATION CONDITIONS
+    # ============================================================
+
     min_ethics_independence_score = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Minimum latest CompetencyAssessment."
-        "ethics_independence_score (0.00-100.00). "
-        "CANDIDATE_MENTOR_CLASSIFICATION rules only.",
-    )
-    #CANDIDATE_MENTOR_CLASSIFICATION field
-    require_latest_assessment_decision = models.CharField(
-        max_length=20,
-        blank=True,
-        choices=AssessmentDecision.choices,
-        help_text="The latest CompetencyAssessment for this professional+"
-        "scope must have this decision (e.g. APPROVED) for the rule to "
-        "match. Blank = not checked.",
-    )
-    #QUALION_LEVEL and DEPLOYABILITY_FLAG fields
-    required_credential_types = models.ManyToManyField(
-        "catalog.ReferenceValue",
-        blank=True,
-        related_name="calc_rules_requiring_credential",
-        help_text="Professional must hold a CredentialRecord of at least "
-        "one of these types (option_set CREDENTIAL_TYPE) for this scope. "
-        "Empty = no credential required by this rule.",
-    )
-    #QUALION_LEVEL and DEPLOYABILITY_FLAG fields
-    require_active_credential = models.BooleanField(
-        default=False,
-        help_text="Only meaningful when required_credential_types is set: "
-        "whether the matching credential must currently be status=ACTIVE, "
-        "vs. any status.",
-    )
-    #DEPLOYABILITY_FLAG 
-    max_days_to_credential_expiry = models.PositiveSmallIntegerField(
-        null=True,
-        blank=True,
-        help_text="Only meaningful when required_credential_types is set: "
-        "the matching credential must expire within this many days "
-        "(e.g. 30) — used for 'expiring soon' deployability rules. Leave "
-        "blank to not check expiry at all.",
-    )
-    #CANDIDATE_MENTOR_CLASSIFICATION field
-    block_if_pending_rejection = models.BooleanField(
-        default=False,
-        help_text="If true, this rule does not match while the professional "
-        "has an unresolved REJECTED ProfessionalReview of type "
-        "RECLASSIFICATION. CANDIDATE_MENTOR_CLASSIFICATION rules only.",
+        help_text=(
+            "Minimum ethics/independence score required to become Mentor."
+        ),
     )
 
-    # ------------------------------------------------------------------
-    # Concluded value — exactly one populated, matching
-    # calculation_field_code; enforced in clean().
-    # ------------------------------------------------------------------
-    #QUALION_LEVEL field
-    concluded_qualion_level = models.ForeignKey(
-        "catalog.ReferenceValue",
+    require_latest_assessment_decision = models.CharField(
+        max_length=20,
+        choices=AssessmentDecision.choices,
+        blank=True,
+        null=True,
+        default="",
+        help_text=(
+            "Required latest assessment decision for Mentor classification. "
+            "Blank means assessment decision is not checked."
+        ),
+    )
+
+    block_if_pending_rejection = models.BooleanField(
+        default=False, 
+        help_text=(
+            "If enabled, Mentor classification fails while an unresolved "
+            "reclassification rejection exists."
+        ),
+    )
+
+    # ============================================================
+    # COMMON GOVERNANCE
+    # ============================================================
+
+    requires_four_eyes_approval = models.BooleanField(
+        default=False,
+        help_text="Whether the calculated result requires four-eyes approval.",
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Inactive configurations are ignored during calculation.",
+    )
+
+    created_by = models.ForeignKey(
+        "accounts.UserTbl",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name="calc_rules_concluded_qualion_level",
-        help_text="Value assigned when this rule matches. QUALION_LEVEL "
-        "rules only (option_set QUALION_LEVEL).",
-    )
-    #DEPLOYABILITY_FLAG field
-    concluded_deployability_status = models.CharField(
-        max_length=30,
-        blank=True,
-        choices=DeployabilityStatus.choices,
-        help_text="Value assigned when this rule matches. DEPLOYABILITY_FLAG "
-        "rules only.",
-    )
-    #CANDIDATE_MENTOR_CLASSIFICATION field
-    concluded_classification = models.CharField(
-        max_length=20,
-        blank=True,
-        choices=Classification.choices,
-        help_text="Value assigned when this rule matches. "
-        "CANDIDATE_MENTOR_CLASSIFICATION rules only.",
-    )
-    #All 3 fields: overrides rule_set.default_requires_human_confirmation for this specific concluded value; set true for L4/L5 and other high-impact outcomes per QUALION_QP-10, requiring reviewer and approver to be different authorised individuals.
-    requires_four_eyes_approval = models.BooleanField(
-        default=False,
-        help_text="Set true for L4/L5 and other high-impact outcomes per "
-        "QUALION_QP-10, requiring reviewer and approver to be different "
-        "authorised individuals.",
-    )
-    is_active = models.BooleanField(
-        default=True,
-        help_text="Disable a single rule without deleting it. Takes effect "
-        "immediately — there is no DRAFT/PUBLISHED staging here.",
-    )
-    created_by = models.ForeignKey(
-        "accounts.UserTbl",
-        on_delete=models.PROTECT, null=True, blank=True,
         related_name="calculation_rules_created",
-        help_text="Tenant Admin/authorised author who created this rule.",
     )
 
     class Meta:
         db_table = "governance_calculation_rule"
-        verbose_name = "CalculationRule"
-        verbose_name_plural = "CalculationRule"
-        ordering = ["calculation_field_code", "sequence"]
+        verbose_name = "Calculation Rule"
+        verbose_name_plural = "Calculation Rules"
+        ordering = ["calculation_field_code", "id"]
 
     def clean(self):
         super().clean()
-        if self.calculation_field_code not in self.RULE_DRIVEN_FIELD_CODES:
-            raise ValidationError({
-                "calculation_field_code": f"{self.calculation_field_code} is "
-                "not one of the 3 rule-driven fields (QUALION_LEVEL, "
-                "DEPLOYABILITY_FLAG, CANDIDATE_MENTOR_CLASSIFICATION) — it's "
-                "a fixed formula and should never have a CalculationRule."
-            })
 
-        concluded_field_for_code = {
-            CalculatedFieldCode.QUALION_LEVEL: "concluded_qualion_level_id",
-            CalculatedFieldCode.DEPLOYABILITY_FLAG: "concluded_deployability_status",
-            CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION: "concluded_classification",
-        }
-        expected_field = concluded_field_for_code[self.calculation_field_code]
-        if not getattr(self, expected_field):
-            raise ValidationError({
-                expected_field: f"Required for a {self.calculation_field_code} rule."
-            })
-        for other_field in concluded_field_for_code.values():
-            if other_field != expected_field and getattr(self, other_field):
+        # Qualion's thresholds belong in QualionLevelCondition,
+        # so parent deployability/classification conditions should not
+        # be configured for a QUALION_LEVEL parent.
+        if self.calculation_field_code == self.CalculationField.QUALION_LEVEL:
+            invalid_fields = []
+
+            if self.min_qualion_level_id:
+                invalid_fields.append("min_qualion_level")
+                
+            if self.min_authority_status_id:
+                invalid_fields.append("min_authority_status")
+
+            if self.min_ethics_independence_score is not None:
+                invalid_fields.append("min_ethics_independence_score")
+
+            if self.require_latest_assessment_decision:
+                invalid_fields.append("require_latest_assessment_decision")
+
+            if self.block_if_pending_rejection:
+                invalid_fields.append("block_if_pending_rejection")
+
+            if self.require_active_credential:
+                invalid_fields.append("require_active_credential")
+
+            if self.max_days_to_credential_expiry is not None:
+                invalid_fields.append("max_days_to_credential_expiry")
+
+            if invalid_fields:
                 raise ValidationError({
-                    other_field: f"Not applicable to a {self.calculation_field_code} "
-                    f"rule — only {expected_field} should be set."
+                    field: "This condition is not applicable to QUALION_LEVEL."
+                    for field in invalid_fields
                 })
 
-    def __str__(self):
-        if self.pk:
-            scopes = self.scope.all()
-            scope_label = ", ".join(str(scope) for scope in scopes) or "tenant-wide"
-        else:
-            scope_label = "tenant-wide"
+        # Deployability doesn't use assessment/classification-only conditions.
+        if self.calculation_field_code == self.CalculationField.DEPLOYABILITY_FLAG:
+            invalid_fields = []
 
-        return (
-            f"{self.tenant} — "
-            f"{self.calculation_field_code} — "
-            f"{scope_label} — "
-            f"#{self.sequence} {self.label}"
-        )        
+            if self.min_ethics_independence_score is not None:
+                invalid_fields.append("min_ethics_independence_score")
+
+            if self.require_latest_assessment_decision:
+                invalid_fields.append("require_latest_assessment_decision")
+
+            if self.block_if_pending_rejection:
+                invalid_fields.append("block_if_pending_rejection")
+
+            if invalid_fields:
+                raise ValidationError({
+                    field: "This condition is only applicable to Mentor classification."
+                    for field in invalid_fields
+                })
+
+        # Classification doesn't use credential/deployability-only conditions.
+        if self.calculation_field_code == self.CalculationField.CANDIDATE_MENTOR_CLASSIFICATION:
+            invalid_fields = []
+
+            if self.require_active_credential:
+                invalid_fields.append("require_active_credential")
+
+            if self.max_days_to_credential_expiry is not None:
+                invalid_fields.append("max_days_to_credential_expiry")
+
+            if invalid_fields:
+                raise ValidationError({
+                    field: "This condition is only applicable to Deployability."
+                    for field in invalid_fields
+                })
+
+    def validate_rule_target(self):
+        """
+        Must be called after the instance has been saved because industry
+        and scope are ManyToMany fields.
+
+        Exactly one target type is allowed:
+            industries only
+            OR
+            scopes only
+        """
+
+        has_industries = self.industry.exists()
+        has_scopes = self.scope.exists()
+
+        if has_industries and has_scopes:
+            raise ValidationError({
+                "industry": "A rule cannot be both industry-specific and scope-specific.",
+                "scope": "A rule cannot be both industry-specific and scope-specific.",
+            })
+
+        if not has_industries and not has_scopes:
+            raise ValidationError({
+                "industry": "Select at least one Industry or Scope.",
+                "scope": "Select at least one Industry or Scope.",
+            })
+
+        invalid_industries = self.industry.exclude(
+            option_set__option_type="INDUSTRY"
+        )
+
+        if invalid_industries.exists():
+            raise ValidationError({
+                "industry": (
+                    "Only ReferenceValue records belonging to the "
+                    "INDUSTRY option set can be selected."
+                )
+            })
+
+    @property
+    def target_type(self):
+        if not self.pk:
+            return None
+
+        if self.industry.exists():
+            return "INDUSTRY"
+
+        if self.scope.exists():
+            return "SCOPE"
+
+        return None
+
+    def get_applicable_scopes(self):
+        """
+        Returns all ScopeCatalog records covered by this rule.
+
+        Industry-specific:
+            every scope under the selected industries.
+
+        Scope-specific:
+            only explicitly selected scopes.
+        """
+
+        from catalog.models import ScopeCatalog
+
+        if not self.pk:
+            return ScopeCatalog.objects.none()
+
+        if self.industry.exists():
+            return ScopeCatalog.objects.filter(
+                industry_id__in=self.industry.values_list("id", flat=True)
+            ).distinct()
+
+        return self.scope.all()
+
+    def applies_to_scope(self, scope):
+        """
+        Convenient helper for calculation engine.
+        """
+
+        if not self.pk or scope is None:
+            return False
+
+        if self.scope.filter(pk=scope.pk).exists():
+            return True
+
+        if self.industry.filter(pk=scope.industry_id).exists():
+            return True
+
+        return False
+
+    def __str__(self):
+        return f"{self.tenant} - {self.calculation_field_code} - {self.label}"
+
+class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
+
+    calculation_rule = models.ForeignKey(
+        CalculationRule,
+        on_delete=models.CASCADE,
+        related_name="qualion_level_conditions",
+    )
+
+    qualion_level = models.ForeignKey(
+        "catalog.ReferenceValue",
+        on_delete=models.PROTECT,
+        related_name="qualion_level_conditions",
+        help_text=(
+            "Qualion level represented by this condition combination. "
+            "Expected values are L5 through L0."
+        ),
+    )
+
+    min_calendar_experience_months = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Minimum calendar experience required in this scope.",
+    )
+
+    min_verified_field_days = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Minimum verified field days required.",
+    )
+
+    min_verified_project_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Minimum verified project count required.",
+    )
+
+    min_authority_status = models.ForeignKey(
+        "catalog.ReferenceValue",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="qualion_conditions_min_authority",
+        help_text="Minimum authority status required for this Qualion level.",
+    )
+
+    min_complexity_rating = models.ForeignKey(
+        "catalog.ReferenceValue",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="qualion_conditions_min_complexity",
+        help_text="Minimum complexity rating required for this Qualion level.",
+    )
+
+
+    required_credential_types = models.ManyToManyField(
+        "catalog.ReferenceValue",
+        blank=True,
+        related_name="qualion_level_conditions_required_credentials",
+        help_text=(
+            "At least one of these credential types must be held. "
+            "Empty means credentials are not checked for this level."
+        ),
+    )
+
+    require_active_credential = models.BooleanField(
+        default=False,
+        help_text=(
+            "If enabled, the matching credential must currently be active."
+        ),
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Disable this particular Qualion level condition.",
+    )
+
+    class Meta:
+        db_table = "governance_qualion_level_condition"
+        verbose_name = "Qualion Level Condition"
+        verbose_name_plural = "Qualion Level Conditions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["calculation_rule", "qualion_level"],
+                name="uq_calc_rule_qualion_level",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        if (self.calculation_rule_id and self.calculation_rule.calculation_field_code != CalculationRule.CalculationField.QUALION_LEVEL):
+            raise ValidationError({
+                "calculation_rule": (
+                    "QualionLevelCondition can only belong to a "
+                    "QUALION_LEVEL CalculationRule."
+                )
+            })
+        if (self.min_calendar_experience_months is not None and self.max_calendar_experience_months is not None and self.min_calendar_experience_months > self.max_calendar_experience_months):
+            raise ValidationError({
+                "max_calendar_experience_months": (
+                    "Maximum experience cannot be less than minimum experience."
+                )
+            })
+
+        if (self.min_verified_field_days is not None and self.max_verified_field_days is not None and self.min_verified_field_days > self.max_verified_field_days):
+            raise ValidationError({
+                "max_verified_field_days": (
+                    "Maximum field days cannot be less than minimum field days."
+                )
+            })
+
+        if (self.min_verified_project_count is not None and self.max_verified_project_count is not None and self.min_verified_project_count > self.max_verified_project_count):
+            raise ValidationError({
+                "max_verified_project_count": (
+                    "Maximum project count cannot be less than minimum project count."
+                )
+            })
+
+    def __str__(self):
+        return f"{self.calculation_rule.label} - {self.qualion_level}"
+
 
 
 

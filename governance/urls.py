@@ -104,4 +104,22 @@ urlpatterns = [
         ProfessionalRuleCalculatedFieldsAPIView.as_view(),
         name="professional-rule-calculated-fields",
     ),
+    
+    path(
+        "calculation-rules/combined/",
+        CalculationRuleCombinedListCreateAPIView.as_view(),
+        name="calculation-rule-combined-list-create",
+    ),
+
+    path(
+        "calculation-rules/combined/<int:pk>/",
+        CalculationRuleCombinedRetrieveUpdateAPIView.as_view(),
+        name="calculation-rule-combined-detail",
+    ),
+
+    path(
+        "calculation-rules/combined/delete/",
+        CalculationRuleCombinedDeleteAPIView.as_view(),
+        name="calculation-rule-combined-delete",
+    ),
 ]

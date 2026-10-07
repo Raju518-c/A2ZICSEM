@@ -641,8 +641,7 @@ class ProfessionalReviewStatusAPIView(APIView):
                 "message": "Stage 2 status fetched successfully.",
                 "data": {
                     "profile_status": professional.profile_status,
-                    "user_approval_status": professional.user.approval_status,
-                    "current_classification": professional.current_classification,
+                    "user_approval_status": professional.user.approval_status,                    
                     "latest_review_decision": latest_review.decision if latest_review else None,
                     "latest_review_reason": latest_review.decision_reason if latest_review else None,
                     "latest_review_version": latest_review.profile_version if latest_review else None,

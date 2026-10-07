@@ -146,7 +146,7 @@ class CoreProfessionalProfileRelatedSerializer(serializers.ModelSerializer):
             "consent_records",
             "registration_application",
             "profile_status",
-            "current_classification",
+            # "current_classification",
             "classification_status",
             "classified_by",
             "classified_at",

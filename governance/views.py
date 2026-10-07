@@ -4573,7 +4573,6 @@ class ProfessionalCalculatedFieldsAPIView(APIView):
 
 
 
-
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -4582,28 +4581,10 @@ QUALION_LEVEL_FIELD = "QUALION_LEVEL"
 DEPLOYABILITY_FIELD = "DEPLOYABILITY_FLAG"
 CLASSIFICATION_FIELD = "CANDIDATE_MENTOR_CLASSIFICATION"
 
-# Latest requirement: Qualion levels are ReferenceValue rows under
-# ReferenceValue.option_set.option_type == "QUALIFICATION_LEVEL".
-QUALION_OPTION_TYPE = "QUALIFICATION_LEVEL"
-
-# Business order is fixed and MUST NOT depend on ReferenceValue PK.
-# Calculation checks from 5 -> 0.
-QUALION_LEVEL_ORDER = {
-    "ASPIRANT / GRADUATE": 0,
-    "ASPIRANT": 0,
-    "TRAINEE SURVEYOR": 1,
-    "TRAINEE": 1,
-    "JUNIOR SURVEYOR": 2,
-    "JUNIOR": 2,
-    "INDEPENDENT SURVEYOR": 3,
-    "INDEPENDENT": 3,
-    "SENIOR / LEAD / VALIDATOR": 4,
-    "SENIOR VALIDATOR": 4,
-    "SENIOR": 4,
-    "PRINCIPAL / TECHNICAL AUTHORITY": 5,
-    "PRINCIPAL AUTHORITY": 5,
-    "PRINCIPAL": 5,
-}
+# ReferenceValue option types used by rule-driven calculated fields.
+QUALION_OPTION_TYPE = "QUALION_LEVEL"
+AUTHORITY_OPTION_TYPE = "AUTHORITY_STATUS"
+COMPLEXITY_OPTION_TYPE = "Complexity"
 
 
 # ============================================================
@@ -4617,59 +4598,28 @@ def normalize_text(value):
 
 
 def get_reference_rank(reference_value):
-    """Generic ReferenceValue rank for authority/complexity comparisons."""
+    """
+    Return the ReferenceValue business rank from sort_order.
+
+    Rule comparisons for QUALION_LEVEL, AUTHORITY_STATUS and Complexity
+    intentionally use sort_order instead of database PK, code or label.
+    """
     if reference_value is None:
         return None
-    return getattr(reference_value, "sort_order", None)
+
+    sort_order = getattr(reference_value, "sort_order", None)
+    if sort_order is None:
+        return None
+
+    try:
+        return int(sort_order)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_qualion_rank(reference_value):
-    """
-    Returns the fixed business Qualion rank:
-        Principal / Technical Authority -> 5
-        Senior / Lead / Validator       -> 4
-        Independent Surveyor            -> 3
-        Junior Surveyor                 -> 2
-        Trainee Surveyor                -> 1
-        Aspirant / Graduate             -> 0
-
-    ReferenceValue database IDs are intentionally ignored.
-    """
-    if reference_value is None:
-        return None
-
-    label = normalize_text(getattr(reference_value, "label", None))
-    if label in QUALION_LEVEL_ORDER:
-        return QUALION_LEVEL_ORDER[label]
-
-    # Support master data where the business level is represented in code.
-    code = normalize_text(getattr(reference_value, "code", None))
-    code_map = {
-        "L0": 0,
-        "LEVEL_0": 0,
-        "0": 0,
-        "L1": 1,
-        "LEVEL_1": 1,
-        "1": 1,
-        "L2": 2,
-        "LEVEL_2": 2,
-        "2": 2,
-        "L3": 3,
-        "LEVEL_3": 3,
-        "3": 3,
-        "L4": 4,
-        "LEVEL_4": 4,
-        "4": 4,
-        "L5": 5,
-        "LEVEL_5": 5,
-        "5": 5,
-    }
-    if code in code_map:
-        return code_map[code]
-
-    # Final fallback only. Prefer the explicit business mapping above.
-    return getattr(reference_value, "sort_order", None)
-
+    """Qualion Level rank is its ReferenceValue.sort_order."""
+    return get_reference_rank(reference_value)
 
 def get_option_type(reference_value):
     if reference_value is None:
@@ -4696,26 +4646,51 @@ def reference_range_satisfied(actual_value, minimum_value=None, maximum_value=No
     if actual_value is None:
         return False
 
-    rank_function = get_qualion_rank if qualion else get_reference_rank
-    actual_rank = rank_function(actual_value)
+    # All ReferenceValue comparisons are based on sort_order.
+    # The qualion argument is retained for backwards-compatible callers.
+    actual_rank = get_reference_rank(actual_value)
     if actual_rank is None:
         return False
 
     if minimum_value is not None:
-        minimum_rank = rank_function(minimum_value)
+        minimum_rank = get_reference_rank(minimum_value)
         if minimum_rank is None or actual_rank < minimum_rank:
             return False
 
     if maximum_value is not None:
-        maximum_rank = rank_function(maximum_value)
+        maximum_rank = get_reference_rank(maximum_value)
         if maximum_rank is None or actual_rank > maximum_rank:
             return False
 
     return True
 
 
-def minimum_reference_satisfied(actual_value, minimum_value, qualion=False):
-    return reference_range_satisfied(actual_value, minimum_value=minimum_value, qualion=qualion)
+def minimum_reference_satisfied(
+    actual_value,
+    minimum_value,
+    qualion=False,
+    expected_option_type=None,
+):
+    """
+    Compare candidate and configured minimum by ReferenceValue.sort_order.
+
+    If expected_option_type is supplied, both values must belong to that
+    ReferenceValue option type before the comparison is made.
+    """
+    if actual_value is None or minimum_value is None:
+        return False
+
+    if expected_option_type is not None:
+        if get_option_type(actual_value) != expected_option_type:
+            return False
+        if get_option_type(minimum_value) != expected_option_type:
+            return False
+
+    return reference_range_satisfied(
+        actual_value,
+        minimum_value=minimum_value,
+        qualion=qualion,
+    )
 
 
 # ============================================================
@@ -4951,10 +4926,22 @@ def evaluate_qualion_condition(condition, calculation_rule, professional_scope, 
         checks.append(numeric_range_satisfied(professional_scope.verified_project_count or 0, min_project_count, max_project_count))
 
     if condition.min_authority_status_id:
-        checks.append(minimum_reference_satisfied(get_scope_authority(professional_scope), condition.min_authority_status))
+        checks.append(
+            minimum_reference_satisfied(
+                get_scope_authority(professional_scope),
+                condition.min_authority_status,
+                expected_option_type=AUTHORITY_OPTION_TYPE,
+            )
+        )
 
     if condition.min_complexity_rating_id:
-        checks.append(minimum_reference_satisfied(get_scope_complexity(professional_scope), condition.min_complexity_rating))
+        checks.append(
+            minimum_reference_satisfied(
+                get_scope_complexity(professional_scope),
+                condition.min_complexity_rating,
+                expected_option_type=COMPLEXITY_OPTION_TYPE,
+            )
+        )
 
     required_types = list(condition.required_credential_types.all())
     if required_types:
@@ -4977,11 +4964,24 @@ def get_ordered_qualion_conditions(calculation_rule):
         .prefetch_related("required_credential_types")
     )
 
-    # Latest requirement: only QUALIFICATION_LEVEL master values participate.
-    conditions = [condition for condition in conditions if get_option_type(condition.qualion_level) == QUALION_OPTION_TYPE]
+    # Only active QUALION_LEVEL master values participate.
+    conditions = [
+        condition
+        for condition in conditions
+        if get_option_type(condition.qualion_level) == QUALION_OPTION_TYPE
+        and getattr(condition.qualion_level, "is_active", True)
+    ]
 
-    # Fixed business order: 5 -> 0, independent of ReferenceValue PK.
-    conditions.sort(key=lambda condition: get_qualion_rank(condition.qualion_level) if get_qualion_rank(condition.qualion_level) is not None else -1, reverse=True)
+    # Evaluate the highest configured Qualion Level first.
+    # Business precedence comes entirely from ReferenceValue.sort_order.
+    conditions.sort(
+        key=lambda condition: (
+            get_reference_rank(condition.qualion_level)
+            if get_reference_rank(condition.qualion_level) is not None
+            else -1
+        ),
+        reverse=True,
+    )
     return conditions
 
 
@@ -5007,10 +5007,23 @@ def evaluate_deployability_rule(rule, professional_scope, credentials):
     checks = []
 
     if rule.min_qualion_level_id:
-        checks.append(minimum_reference_satisfied(professional_scope.current_qualion_level, rule.min_qualion_level, qualion=True))
+        checks.append(
+            minimum_reference_satisfied(
+                professional_scope.current_qualion_level,
+                rule.min_qualion_level,
+                qualion=True,
+                expected_option_type=QUALION_OPTION_TYPE,
+            )
+        )
 
     if rule.min_authority_status_id:
-        checks.append(minimum_reference_satisfied(get_scope_authority(professional_scope), rule.min_authority_status))
+        checks.append(
+            minimum_reference_satisfied(
+                get_scope_authority(professional_scope),
+                rule.min_authority_status,
+                expected_option_type=AUTHORITY_OPTION_TYPE,
+            )
+        )
 
     required_types = list(rule.required_credential_types.all())
     if required_types:
@@ -5044,10 +5057,23 @@ def evaluate_classification_rule(rule, professional_scope, profile):
     checks = []
 
     if rule.min_qualion_level_id:
-        checks.append(minimum_reference_satisfied(professional_scope.current_qualion_level, rule.min_qualion_level, qualion=True))
+        checks.append(
+            minimum_reference_satisfied(
+                professional_scope.current_qualion_level,
+                rule.min_qualion_level,
+                qualion=True,
+                expected_option_type=QUALION_OPTION_TYPE,
+            )
+        )
 
     if rule.min_authority_status_id:
-        checks.append(minimum_reference_satisfied(get_scope_authority(professional_scope), rule.min_authority_status))
+        checks.append(
+            minimum_reference_satisfied(
+                get_scope_authority(professional_scope),
+                rule.min_authority_status,
+                expected_option_type=AUTHORITY_OPTION_TYPE,
+            )
+        )
 
     latest_assessment = None
     if rule.min_ethics_independence_score is not None or rule.require_latest_assessment_decision:
@@ -5181,6 +5207,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                 "min_qualion_level",
                 "min_qualion_level__option_set",
                 "min_authority_status",
+                "min_authority_status__option_set",
             )
             .prefetch_related(
                 "scope",
@@ -5207,7 +5234,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             previous_classification = professional_scope.current_classification
 
             # ------------------------------------------------
-            # A. QUALION LEVEL: check configured levels 5 -> 0
+            # A. QUALION LEVEL: check configured levels by sort_order (highest -> lowest)
             # ------------------------------------------------
             qualion_rule = get_rule_for_scope(all_rules, QUALION_LEVEL_FIELD, professional_scope)
             matched_qualion_condition = calculate_qualion_level(qualion_rule, professional_scope, credentials)
@@ -5261,7 +5288,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                     "qualion_level": {
                         "previous": reference_value_response(previous_qualion),
                         "calculated": reference_value_response(professional_scope.current_qualion_level),
-                        "checked_order": "5 -> 0",
+                        "checked_order": "sort_order DESC",
                         "matched_condition_id": matched_qualion_condition.pk if matched_qualion_condition else None,
                         "calculation_rule_id": qualion_rule.pk if qualion_rule else None,
                         "calculation_rule": qualion_rule.label if qualion_rule else None,
@@ -5305,6 +5332,10 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+
+
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -5374,7 +5405,36 @@ class CalculationRuleCombinedListCreateAPIView(APIView):
             condition = QualionLevelCondition.objects.create(
                 calculation_rule=rule,
                 tenant=rule.tenant,
-                **item
+
+                qualion_level_id=item.get("qualion_level"),
+
+                min_calendar_experience_months=item.get(
+                    "min_calendar_experience_months"
+                ),
+                min_verified_field_days=item.get(
+                    "min_verified_field_days"
+                ),
+                min_verified_project_count=item.get(
+                    "min_verified_project_count"
+                ),
+
+                min_authority_status_id=item.get(
+                    "min_authority_status"
+                ) or None,
+
+                min_complexity_rating_id=item.get(
+                    "min_complexity_rating"
+                ) or None,
+
+                require_active_credential=item.get(
+                    "require_active_credential",
+                    False,
+                ),
+
+                is_active=  item.get(
+                    "is_active",
+                    True,
+                ),
             )
 
             if credential_types:
@@ -5523,10 +5583,45 @@ class CalculationRuleCombinedRetrieveUpdateAPIView(APIView):
                 []
             )
 
+            # condition = QualionLevelCondition.objects.create(
+            #     calculation_rule=rule,
+            #     tenant=rule.tenant,
+            #     **item
+            # )
+            
             condition = QualionLevelCondition.objects.create(
                 calculation_rule=rule,
                 tenant=rule.tenant,
-                **item
+
+                qualion_level_id=item.get("qualion_level"),
+
+                min_calendar_experience_months=item.get(
+                    "min_calendar_experience_months"
+                ),
+                min_verified_field_days=item.get(
+                    "min_verified_field_days"
+                ),
+                min_verified_project_count=item.get(
+                    "min_verified_project_count"
+                ),
+
+                min_authority_status_id=item.get(
+                    "min_authority_status"
+                ) or None,
+
+                min_complexity_rating_id=item.get(
+                    "min_complexity_rating"
+                ) or None,
+
+                require_active_credential=item.get(
+                    "require_active_credential",
+                    False,
+                ),
+
+                is_active=item.get(
+                    "is_active",
+                    True,
+                ),
             )
 
             if credential_types:

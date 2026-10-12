@@ -210,6 +210,7 @@ SCOPE_FIELD_CODES = {
     CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED,
     CalculatedFieldCode.QUALION_LEVEL,
     CalculatedFieldCode.DEPLOYABILITY_FLAG,
+    CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
 }
 
 class CalculatedFieldOverrideItemSerializer(serializers.Serializer):
@@ -274,11 +275,6 @@ class CalculatedFieldOverrideItemSerializer(serializers.Serializer):
                 "credential_record_id": "credential_record_id is required."
             })
 
-        if code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION and not attrs.get("professional_review_id"):
-            raise serializers.ValidationError({
-                "professional_review_id": "professional_review_id is required."
-            })
-
         return attrs
 
 
@@ -296,3 +292,17 @@ class CalculatedFieldAdminVerificationSerializer(serializers.Serializer):
         many=True,
         allow_empty=False,
     )
+
+class CalculatedFieldOverrideSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalculatedFieldOverride
+        fields = "__all__"
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class CalculatedFieldValueHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalculatedFieldValueHistory
+        fields = "__all__"
+        read_only_fields = ("created_at",)
+        

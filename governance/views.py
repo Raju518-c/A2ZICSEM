@@ -903,6 +903,7 @@ SCOPE_FIELD_MAP = {
     CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED: "highest_authority_reached",
     CalculatedFieldCode.QUALION_LEVEL: "current_qualion_level",
     CalculatedFieldCode.DEPLOYABILITY_FLAG: "is_deployable",
+    CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION: "current_classification",
 }
 
 
@@ -1535,6 +1536,7 @@ def process_scope_field(
             .get(
                 pk=professional_scope_id,
                 professional=professional,
+                tenant=professional.tenant,
             )
         )
 
@@ -2110,134 +2112,169 @@ def process_candidate_mentor_classification(
     item,
     ruleset_version,
 ):
-    """
-    Admin verification for Candidate/Mentor classification.
+    professional_review_id = item.get(
+        "professional_review_id"
+    )
 
-    current_classification is stored on ProfessionalScope, not
-    ProfessionalProfile. A professional_scope_id is therefore required when
-    changing current_classification. Profile-level classification_status and
-    ProfessionalReview fields remain on their existing models.
-    """
-    professional_review_id = item.get("professional_review_id")
-    professional_scope_id = item.get("professional_scope_id")
     incoming = item["value"]
 
     if not isinstance(incoming, dict):
         raise serializers.ValidationError({
             "value": (
-                "CANDIDATE_MENTOR_CLASSIFICATION value must be an object."
+                "CANDIDATE_MENTOR_CLASSIFICATION "
+                "value must be an object."
             )
         })
 
     profile = (
-        ProfessionalProfile.objects.select_for_update().get(pk=professional.pk)
+        ProfessionalProfile.objects
+        .select_for_update()
+        .get(
+            pk=professional.pk
+        )
     )
 
     try:
         review = (
-            ProfessionalReview.objects.select_for_update().get(
+            ProfessionalReview.objects
+            .select_for_update()
+            .get(
                 pk=professional_review_id,
                 professional=professional,
             )
         )
+
     except ProfessionalReview.DoesNotExist:
         raise serializers.ValidationError({
             "professional_review_id": (
-                f"ProfessionalReview {professional_review_id} does not belong "
-                f"to professional {professional.pk}."
+                f"ProfessionalReview "
+                f"{professional_review_id} "
+                f"does not belong to professional "
+                f"{professional.pk}."
             )
         })
 
-    professional_scope = None
-    if "current_classification" in incoming:
-        if not professional_scope_id:
-            raise serializers.ValidationError({
-                "professional_scope_id": (
-                    "professional_scope_id is required when updating "
-                    "current_classification."
-                )
-            })
-        try:
-            professional_scope = (
-                ProfessionalScope.objects.select_for_update().get(
-                    pk=professional_scope_id,
-                    professional=professional,
-                    tenant=professional.tenant,
-                )
-            )
-        except ProfessionalScope.DoesNotExist:
-            raise serializers.ValidationError({
-                "professional_scope_id": (
-                    f"ProfessionalScope {professional_scope_id} does not belong "
-                    f"to professional {professional.pk}."
-                )
-            })
-
-    previous_classification = (
-        professional_scope.current_classification
-        if professional_scope is not None
-        else None
-    )
-
     previous_value = {
-        "current_classification": json_safe_value(previous_classification),
-        "classification_status": json_safe_value(profile.classification_status),
-        "system_recommendation": json_safe_value(review.system_recommendation),
-        "decision": json_safe_value(review.decision),
-        "final_classification": json_safe_value(review.final_classification),
+        "current_classification": (
+            json_safe_value(
+                profile.current_classification
+            )
+        ),
+        "classification_status": (
+            json_safe_value(
+                profile.classification_status
+            )
+        ),
+        "system_recommendation": (
+            json_safe_value(
+                review.system_recommendation
+            )
+        ),
+        "decision": (
+            json_safe_value(
+                review.decision
+            )
+        ),
+        "final_classification": (
+            json_safe_value(
+                review.final_classification
+            )
+        ),
     }
 
+    # -------------------------------------------------------------------------
+    # Resolve each incoming field only if provided.
+    # -------------------------------------------------------------------------
+
     if "current_classification" in incoming:
-        current_classification = resolve_new_field_value(
-            professional_scope,
-            "current_classification",
-            incoming["current_classification"],
+        current_classification = (
+            resolve_new_field_value(
+                profile,
+                "current_classification",
+                incoming["current_classification"],
+            )
         )
     else:
-        current_classification = previous_classification
+        current_classification = (
+            profile.current_classification
+        )
 
     if "classification_status" in incoming:
-        classification_status = resolve_new_field_value(
-            profile,
-            "classification_status",
-            incoming["classification_status"],
+        classification_status = (
+            resolve_new_field_value(
+                profile,
+                "classification_status",
+                incoming["classification_status"],
+            )
         )
     else:
-        classification_status = profile.classification_status
+        classification_status = (
+            profile.classification_status
+        )
 
     if "system_recommendation" in incoming:
-        system_recommendation = resolve_new_field_value(
-            review,
-            "system_recommendation",
-            incoming["system_recommendation"],
+        system_recommendation = (
+            resolve_new_field_value(
+                review,
+                "system_recommendation",
+                incoming["system_recommendation"],
+            )
         )
     else:
-        system_recommendation = review.system_recommendation
+        system_recommendation = (
+            review.system_recommendation
+        )
 
     if "decision" in incoming:
-        decision = resolve_new_field_value(
-            review,
-            "decision",
-            incoming["decision"],
+        decision = (
+            resolve_new_field_value(
+                review,
+                "decision",
+                incoming["decision"],
+            )
         )
     else:
         decision = review.decision
 
     if "final_classification" in incoming:
-        final_classification = resolve_new_field_value(
-            review,
-            "final_classification",
-            incoming["final_classification"],
+        final_classification = (
+            resolve_new_field_value(
+                review,
+                "final_classification",
+                incoming["final_classification"],
+            )
         )
     else:
-        final_classification = review.final_classification
+        final_classification = (
+            review.final_classification
+        )
 
     new_value = {
-        "current_classification": json_safe_value(current_classification),
-        "classification_status": json_safe_value(classification_status),
-        "system_recommendation": json_safe_value(system_recommendation),
-        "decision": json_safe_value(decision),
-        "final_classification": json_safe_value(final_classification),
+        "current_classification": (
+            json_safe_value(
+                current_classification
+            )
+        ),
+        "classification_status": (
+            json_safe_value(
+                classification_status
+            )
+        ),
+        "system_recommendation": (
+            json_safe_value(
+                system_recommendation
+            )
+        ),
+        "decision": (
+            json_safe_value(
+                decision
+            )
+        ),
+        "final_classification": (
+            json_safe_value(
+                final_classification
+            )
+        ),
     }
 
     if previous_value == new_value:
@@ -2247,52 +2284,71 @@ def process_candidate_mentor_classification(
                 CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
             ),
             "professional_review_id": review.pk,
-            "professional_scope_id": (
-                professional_scope.pk if professional_scope else None
+            "target_model": (
+                "ProfessionalProfile + ProfessionalReview"
             ),
-            "target_model": "ProfessionalScope + ProfessionalProfile + ProfessionalReview",
             "previous_value": previous_value,
             "new_value": new_value,
             "message": "Value unchanged.",
         }
 
-    history_target = professional_scope or profile
-    field_name = (
-        "current_classification,"
-        "ProfessionalProfile.classification_status,"
-        "ProfessionalReview.system_recommendation,"
-        "ProfessionalReview.decision,"
-        "ProfessionalReview.final_classification"
-    )
-
-    override, history, override_action = create_or_update_override_and_history(
-        batch_id=batch_id,
-        professional=professional,
-        professional_scope=professional_scope,
-        target_instance=history_target,
-        field_name=field_name,
-        calculation_field_code=(
-            CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
-        ),
-        previous_value=previous_value,
-        new_value=new_value,
-        item=item,
-        updated_by=updated_by,
-        ruleset_version=ruleset_version,
-    )
-
-    if professional_scope is not None:
-        professional_scope.current_classification = current_classification
-        professional_scope.save(
-            update_fields=["current_classification", "updated_at"]
+    override, history, override_action = (
+        create_or_update_override_and_history(
+            batch_id=batch_id,
+            professional=professional,
+            professional_scope=None,
+            target_instance=profile,
+            field_name=(
+                "current_classification,"
+                "classification_status,"
+                "ProfessionalReview.system_recommendation,"
+                "ProfessionalReview.decision,"
+                "ProfessionalReview.final_classification"
+            ),
+            calculation_field_code=(
+                CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
+            ),
+            previous_value=previous_value,
+            new_value=new_value,
+            item=item,
+            updated_by=updated_by,
+            ruleset_version=ruleset_version,
         )
+    )
 
-    profile.classification_status = classification_status
-    profile.save(update_fields=["classification_status", "updated_at"])
+    # -------------------------------------------------------------------------
+    # Update ProfessionalProfile
+    # -------------------------------------------------------------------------
 
-    review.system_recommendation = system_recommendation
+    profile.current_classification = (
+        current_classification
+    )
+
+    profile.classification_status = (
+        classification_status
+    )
+
+    profile.save(
+        update_fields=[
+            "current_classification",
+            "classification_status",
+        ]
+    )
+
+    # -------------------------------------------------------------------------
+    # Update ProfessionalReview
+    # -------------------------------------------------------------------------
+
+    review.system_recommendation = (
+        system_recommendation
+    )
+
     review.decision = decision
-    review.final_classification = final_classification
+
+    review.final_classification = (
+        final_classification
+    )
+
     review.save(
         update_fields=[
             "system_recommendation",
@@ -2301,28 +2357,16 @@ def process_candidate_mentor_classification(
         ]
     )
 
-    # Rebuild account flags from all scope classifications.
-    classifications = set(
-        ProfessionalScope.objects.filter(
-            professional=professional,
-            tenant=professional.tenant,
-        ).values_list("current_classification", flat=True)
-    )
-    user = UserTbl.objects.select_for_update().get(pk=professional.user_id)
-    user.is_candidate = ProfessionalScope.Classification.CANDIDATE in classifications
-    user.is_mentor = ProfessionalScope.Classification.MENTOR in classifications
-    user.save(update_fields=["is_candidate", "is_mentor"])
-
     return {
         "status": "UPDATED",
         "calculation_field_code": (
             CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION
         ),
-        "professional_review_id": review.pk,
-        "professional_scope_id": (
-            professional_scope.pk if professional_scope else None
+        "target_model": (
+            "ProfessionalProfile + ProfessionalReview"
         ),
-        "target_model": "ProfessionalScope + ProfessionalProfile + ProfessionalReview",
+        "target_id": profile.pk,
+        "professional_review_id": review.pk,
         "previous_value": previous_value,
         "new_value": new_value,
         "override_id": str(override.pk),
@@ -2330,6 +2374,10 @@ def process_candidate_mentor_classification(
         "history_id": history.pk,
     }
 
+
+# =============================================================================
+# MAIN CALCULATED FIELD ROUTER
+# =============================================================================
 
 def process_calculated_field(
     *,
@@ -2401,19 +2449,6 @@ def process_calculated_field(
 
     if code == CalculatedFieldCode.CREDENTIAL_STATUS:
         return process_credential_status(
-            batch_id=batch_id,
-            professional=professional,
-            updated_by=updated_by,
-            item=item,
-            ruleset_version=ruleset_version,
-        )
-
-    # -------------------------------------------------------------------------
-    # Candidate / Mentor classification
-    # -------------------------------------------------------------------------
-
-    if code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
-        return process_candidate_mentor_classification(
             batch_id=batch_id,
             professional=professional,
             updated_by=updated_by,
@@ -2934,6 +2969,8 @@ class OverrideCalculatedFieldAPIView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
 # ============================================================
 # 3. Recalculate all 11 fixed-formula fields for a professional in one
 #    call. None of these read CalculationRuleSet/CalculationRule — see
@@ -2942,44 +2979,44 @@ class OverrideCalculatedFieldAPIView(APIView):
 #    CANDIDATE_MENTOR_CLASSIFICATION) are NOT touched here; keep using
 #    CalculateSystemFieldAPIView for those.
 # ============================================================
-# 
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class CalculateFixedSystemFieldsAPIView(APIView):
     """
-        POST : Recalculate every fixed-formula system-calculated field for one
-        professional and save each straight into its destination table,
-        logging one CalculatedFieldValueHistory row per field
-        (change_source=SYSTEM_RECALCULATION). Covers:
+    POST : Recalculate every fixed-formula system-calculated field for one
+    professional and save each straight into its destination table,
+    logging one CalculatedFieldValueHistory row per field
+    (change_source=SYSTEM_RECALCULATION). Covers:
 
-        Scoped (per Industry/Scope):
-            Calendar Experience, Verified Field Days, Verified Project Count,
-            Highest Authority Reached
-        Profile-wide:
-            Professional Headline, Professional Summary, Primary Role,
-            Additional Roles, Industries Served, Total Career Experience
-        Per-record:
-            Credential Status (applied to every ACTIVE/EXPIRING_SOON/EXPIRED
-            credential with an expiry_date), Project Responsibility Bullets
-            (applied to every ProjectRecord whose responsibilities field is
-            currently blank — never overwrites existing candidate text)
+      Scoped (per Industry/Scope):
+        Calendar Experience, Verified Field Days, Verified Project Count,
+        Highest Authority Reached
+      Profile-wide:
+        Professional Headline, Professional Summary, Primary Role,
+        Additional Roles, Industries Served, Total Career Experience
+      Per-record:
+        Credential Status (applied to every ACTIVE/EXPIRING_SOON/EXPIRED
+        credential with an expiry_date), Project Responsibility Bullets
+        (applied to every ProjectRecord whose responsibilities field is
+        currently blank — never overwrites existing candidate text)
 
-        Body:
-        {
-            "professional_id": <id>
-        }
+    Body:
+      {
+        "professional_id": <id>
+      }
 
-        Scoped fields run once per ScopeCatalog discovered from this
-        professional's own project experience (distinct scopes behind their
-        ProjectScope rows) — a ProfessionalScope row is created for any scope
-        that doesn't already have one. There's no payload option to restrict
-        or seed an arbitrary scope list; it's always everything their projects
-        already touch.
+    Scoped fields run once per ScopeCatalog discovered from this
+    professional's own project experience (distinct scopes behind their
+    ProjectScope rows) — a ProfessionalScope row is created for any scope
+    that doesn't already have one. There's no payload option to restrict
+    or seed an arbitrary scope list; it's always everything their projects
+    already touch.
 
-        A failure on one field (e.g. no verified data yet for that scope)
-        does not stop the rest — it comes back as one "ERROR" entry alongside
-        the others' "SAVED" entries, so the response always reflects the full
-        batch outcome, never just the first failure.
+    A failure on one field (e.g. no verified data yet for that scope)
+    does not stop the rest — it comes back as one "ERROR" entry alongside
+    the others' "SAVED" entries, so the response always reflects the full
+    batch outcome, never just the first failure.
     """
 
     permission_classes = [AllowAny]

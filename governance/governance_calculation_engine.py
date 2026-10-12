@@ -64,6 +64,7 @@ SCOPED_FIELDS = {
     CalculatedFieldCode.HIGHEST_AUTHORITY_REACHED,
     CalculatedFieldCode.QUALION_LEVEL,
     CalculatedFieldCode.DEPLOYABILITY_FLAG,
+    CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
 }
 PROFILE_FIELDS = {
     CalculatedFieldCode.PROFESSIONAL_HEADLINE,
@@ -72,7 +73,6 @@ PROFILE_FIELDS = {
     CalculatedFieldCode.ADDITIONAL_ROLES,
     CalculatedFieldCode.INDUSTRIES_SERVED,
     CalculatedFieldCode.TOTAL_CAREER_EXPERIENCE,
-    CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
 }
 SUPPORTED_FIELDS = SCOPED_FIELDS | PROFILE_FIELDS
 
@@ -841,12 +841,13 @@ def handle_additional_roles(professional, scope, tenant):
 
 
 def handle_classification(professional, scope, tenant):
-    context = build_classification_context(professional)
-    return _handle_rule_based_profile_field(
+    # current_classification is scope-specific and lives on ProfessionalScope.
+    return _handle_rule_based_scope_field(
         professional,
+        scope,
+        tenant,
         CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION,
         "current_classification",
-        context,
     )
 
 
@@ -881,30 +882,19 @@ def _serialize_current_value(target_instance, field_name):
     return current
 
 
-def sync_user_candidate_mentor_flags(professional, classification_value):
-    """Keep accounts.UserTbl.is_candidate/is_mentor in lockstep with
-    ProfessionalProfile.current_classification.
+def sync_user_candidate_mentor_flags(professional):
+    """Synchronize UserTbl flags from all ProfessionalScope classifications."""
+    classifications = set(
+        ProfessionalScope.objects.filter(
+            professional=professional,
+            tenant=professional.tenant,
+        ).values_list("current_classification", flat=True)
+    )
 
-    current_classification is the single field the calculation engine
-    and the override API actually write to (see TARGET_FIELD_NAME). The
-    boolean pair on UserTbl is a separate table/row and nothing was ever
-    setting it, so it silently stayed at its default (False, False) no
-    matter what the classification engine concluded.
+    is_candidate = "CANDIDATE" in classifications
+    is_mentor = "MENTOR" in classifications
 
-    A professional can be both a candidate and a mentor at once
-    (Classification.BOTH), so this is two independent booleans, not one
-    flag flip — CANDIDATE/MENTOR/BOTH/UNCLASSIFIED all map to a distinct
-    (is_candidate, is_mentor) pair.
-    """
     user = professional.user
-    is_candidate = classification_value in (
-        ProfessionalProfile.Classification.CANDIDATE,
-        ProfessionalProfile.Classification.Both,
-    )
-    is_mentor = classification_value in (
-        ProfessionalProfile.Classification.MENTOR,
-        ProfessionalProfile.Classification.Both,
-    )
     if user.is_candidate != is_candidate or user.is_mentor != is_mentor:
         user.is_candidate = is_candidate
         user.is_mentor = is_mentor
@@ -933,13 +923,10 @@ def apply_calculated_value(
         target_instance.last_recalculated_at = timezone.now()
     target_instance.save()
 
-    # CANDIDATE_MENTOR_CLASSIFICATION only ever wrote current_classification
-    # on ProfessionalProfile; it never touched accounts.UserTbl.is_candidate/
-    # is_mentor, which is why those flags never moved from either the
-    # system calculate API or an approved override. Sync them here so both
-    # call sites (calculate + override-approve) stay covered from one place.
+    # Candidate/Mentor classification is stored on ProfessionalScope.
+    # Keep account-level routing flags synchronized from all scope values.
     if calculation_field_code == CalculatedFieldCode.CANDIDATE_MENTOR_CLASSIFICATION:
-        sync_user_candidate_mentor_flags(professional, resolved_value)
+        sync_user_candidate_mentor_flags(professional)
 
     history = CalculatedFieldValueHistory.objects.create(
         tenant=tenant,

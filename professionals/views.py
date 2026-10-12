@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 
 from governance.views import *
+from competency.models import ProfessionalScope
 from accounts.models import UserTbl
 from rest_framework.test import APIRequestFactory
 
@@ -149,6 +150,77 @@ class ProfessionalReviewRetrieveUpdateDeleteAPIView(APIView):
         review.delete()
         return Response({"success": True, "message": "Professional review deleted successfully."}, status=status.HTTP_200_OK)
 
+
+
+def get_professional_scope_classification_summary(professional):
+    """
+    Return the person-level summary used only by ProfessionalReview history.
+
+    current_classification itself is stored per ProfessionalScope.
+    Mixed Candidate/Mentor scopes are represented as BOTH in the review.
+    """
+    values = set(
+        ProfessionalScope.objects.filter(
+            professional=professional,
+            tenant=professional.tenant,
+        )
+        .exclude(current_classification__isnull=True)
+        .exclude(current_classification="")
+        .values_list("current_classification", flat=True)
+    )
+
+    values.discard(ProfessionalScope.Classification.UNCLASSIFIED)
+
+    has_candidate = ProfessionalScope.Classification.CANDIDATE in values
+    has_mentor = ProfessionalScope.Classification.MENTOR in values
+
+    if has_candidate and has_mentor:
+        return ProfessionalReview.Classification.BOTH
+    if has_mentor:
+        return ProfessionalReview.Classification.MENTOR
+    if has_candidate:
+        return ProfessionalReview.Classification.CANDIDATE
+    return ProfessionalReview.Classification.UNCLASSIFIED
+
+
+def apply_final_classification_to_scopes(professional, final_classification):
+    """
+    Reviewer final classification is applied to every existing ProfessionalScope.
+
+    The Stage-2 decision endpoint still accepts one final_classification value.
+    Since current_classification moved off ProfessionalProfile, the destination
+    must now be ProfessionalScope.
+    """
+    scopes = list(
+        ProfessionalScope.objects.select_for_update().filter(
+            professional=professional,
+            tenant=professional.tenant,
+        )
+    )
+
+    for professional_scope in scopes:
+        professional_scope.current_classification = final_classification
+        professional_scope.save(
+            update_fields=["current_classification", "updated_at"]
+        )
+
+    # Keep the account-level routing flags consistent with scope classifications.
+    classifications = {
+        scope.current_classification
+        for scope in scopes
+        if scope.current_classification
+    }
+    professional.user.is_candidate = (
+        ProfessionalScope.Classification.CANDIDATE in classifications
+    )
+    professional.user.is_mentor = (
+        ProfessionalScope.Classification.MENTOR in classifications
+    )
+    professional.user.save(
+        update_fields=["is_candidate", "is_mentor", "updated_at"]
+    )
+
+    return scopes
 
 class Stage2CalculationError(Exception):
     def __init__(self, message, calculation_type=None, details=None):
@@ -301,7 +373,7 @@ class Stage2SubmitAPIView(APIView):
                     profile_version=professional.profile_version,
                     submitted_by=professional.user,
                     submitted_at=now,
-                    previous_classification=professional.current_classification,
+                    previous_classification=get_professional_scope_classification_summary(professional),
                 )
 
                 professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
@@ -352,7 +424,7 @@ class ProfessionalReviewDecisionAPIView(APIView):
     Approving is the ONE action that finally flips UserTbl.approval_status
     to APPROVED — Stage 1 deliberately leaves it PENDING_APPROVAL, so this
     is where the account becomes fully active. final_classification is
-    required and is copied onto ProfessionalProfile.current_classification.
+    required and is copied onto each ProfessionalScope.current_classification.
     Approving also confirms classification on the profile itself
     (classification_status -> CONFIRMED, classified_by/classified_at set)
     — this decision IS the classification confirmation the profile fields
@@ -454,14 +526,19 @@ class ProfessionalReviewDecisionAPIView(APIView):
                 ])
 
                 professional.profile_status = ProfessionalProfile.ProfileStatus.APPROVED
-                professional.current_classification = final_classification
                 professional.classification_status = ProfessionalProfile.ClassificationStatus.CONFIRMED
                 professional.classified_by = reviewed_by
                 professional.classified_at = now
                 professional.save(update_fields=[
-                    "profile_status", "current_classification", "classification_status",
+                    "profile_status", "classification_status",
                     "classified_by", "classified_at", "updated_at",
                 ])
+
+                # current_classification now belongs to ProfessionalScope.
+                apply_final_classification_to_scopes(
+                    professional,
+                    final_classification,
+                )
 
                 # chk_user_approved_at_required_when_approved requires
                 # approved_at whenever approval_status=APPROVED — must be
@@ -536,8 +613,8 @@ class ProfessionalReviewResubmitAPIView(APIView):
     auth isn't wired to UserTbl yet, and submitted_by is a required FK
     to UserTbl that request.user could never satisfy.
 
-    Metrics recalculation is intentionally NOT called here, same as
-    Stage2SubmitAPIView — that calculation engine doesn't exist yet.
+    The same fixed and rule-driven calculations are executed here as in
+    Stage2SubmitAPIView so corrected data is recalculated before review.
     """
 
     permission_classes = [AllowAny]
@@ -572,7 +649,7 @@ class ProfessionalReviewResubmitAPIView(APIView):
                     profile_version=professional.profile_version,
                     submitted_by=professional.user,
                     submitted_at=now,
-                    previous_classification=professional.current_classification,
+                    previous_classification=get_professional_scope_classification_summary(professional),
                 )
 
                 calculation_result = run_stage2_calculations(professional.id)

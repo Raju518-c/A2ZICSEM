@@ -93,12 +93,13 @@ urlpatterns = [
         name="calculated-field-admin-verification",
     ),
     
-    
+    #for 12 calculated fields       
     path(
         "professional/calculated-fields/",
         ProfessionalCalculatedFieldsAPIView.as_view(),
         name="professional-calculated-fields",
     ),
+    #for 3 calculated fields
     path(
         "calculated-fields/rule-calculate/<int:pk>/",
         ProfessionalRuleCalculatedFieldsAPIView.as_view(),

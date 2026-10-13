@@ -182,11 +182,24 @@ class UserTblSerializer(serializers.ModelSerializer):
         )
         return application.status if application else None
 
+    # def get_professional_profile_status(self, obj):
+    #     try:
+    #         return obj.professional_profile.profile_status
+    #     except ProfessionalProfile.DoesNotExist:
+    #         return None
+    
     def get_professional_profile_status(self, obj):
         try:
-            return obj.professional_profile.profile_status
+            profile = obj.professional_profile
         except ProfessionalProfile.DoesNotExist:
             return None
+
+        if not ProfessionalReview.objects.filter(
+            professional_id=profile.pk
+        ).exists():
+            return None
+
+        return profile.profile_status
 
     def create(self, validated_data):
         roles = validated_data.pop("role", [])

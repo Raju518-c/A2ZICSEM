@@ -5537,33 +5537,30 @@ class CalculationRuleCombinedRetrieveUpdateAPIView(APIView):
 
         for item in update_conditions:
 
-            condition_id = item.pop(
-                "id"
-            )
-
-            credential_types = item.pop(
-                "required_credential_types",
-                None
-            )
-
-            condition = QualionLevelCondition.objects.get(
-                pk=condition_id,
-                calculation_rule=rule
-            )
-
-            for key, value in item.items():
-                setattr(
-                    condition,
-                    key,
-                    value
+            # Validate FK IDs and field types through DRF instead of assigning
+            # raw integer IDs to Django ForeignKey descriptors.
+            condition_id = item.get("id")
+            if not condition_id:
+                raise serializers.ValidationError({
+                    "update_conditions": "Each updated condition requires an id."
+                })
+            try:
+                condition = QualionLevelCondition.objects.get(
+                    pk=condition_id,
+                    calculation_rule=rule,
+                    tenant=rule.tenant,
                 )
+            except QualionLevelCondition.DoesNotExist:
+                raise serializers.ValidationError({
+                    "update_conditions": f"Condition {condition_id} does not belong to this rule."
+                })
 
-            condition.save()
-
-            if credential_types is not None:
-                condition.required_credential_types.set(
-                    credential_types
-                )
+            condition_data = {k: value for k, value in item.items() if k != "id"}
+            condition_serializer = QualionLevelConditionSerializer(
+                condition, data=condition_data, partial=True
+            )
+            condition_serializer.is_valid(raise_exception=True)
+            condition_serializer.save()
 
         for item in new_conditions:
 

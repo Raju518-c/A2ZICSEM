@@ -1110,26 +1110,26 @@ class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
                     "QUALION_LEVEL CalculationRule."
                 )
             })
-        if (self.min_calendar_experience_months is not None and self.max_calendar_experience_months is not None and self.min_calendar_experience_months > self.max_calendar_experience_months):
-            raise ValidationError({
-                "max_calendar_experience_months": (
-                    "Maximum experience cannot be less than minimum experience."
-                )
-            })
+        # if (self.min_calendar_experience_months is not None and self.max_calendar_experience_months is not None and self.min_calendar_experience_months > self.max_calendar_experience_months):
+        #     raise ValidationError({
+        #         "max_calendar_experience_months": (
+        #             "Maximum experience cannot be less than minimum experience."
+        #         )
+        #     })
 
-        if (self.min_verified_field_days is not None and self.max_verified_field_days is not None and self.min_verified_field_days > self.max_verified_field_days):
-            raise ValidationError({
-                "max_verified_field_days": (
-                    "Maximum field days cannot be less than minimum field days."
-                )
-            })
+        # if (self.min_verified_field_days is not None and self.max_verified_field_days is not None and self.min_verified_field_days > self.max_verified_field_days):
+        #     raise ValidationError({
+        #         "max_verified_field_days": (
+        #             "Maximum field days cannot be less than minimum field days."
+        #         )
+        #     })
 
-        if (self.min_verified_project_count is not None and self.max_verified_project_count is not None and self.min_verified_project_count > self.max_verified_project_count):
-            raise ValidationError({
-                "max_verified_project_count": (
-                    "Maximum project count cannot be less than minimum project count."
-                )
-            })
+        # if (self.min_verified_project_count is not None and self.max_verified_project_count is not None and self.min_verified_project_count > self.max_verified_project_count):
+        #     raise ValidationError({
+        #         "max_verified_project_count": (
+        #             "Maximum project count cannot be less than minimum project count."
+        #         )
+        #     })
 
     def __str__(self):
         return f"{self.calculation_rule.label} - {self.qualion_level}"

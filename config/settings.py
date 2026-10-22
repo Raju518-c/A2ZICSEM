@@ -315,20 +315,22 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     [
-        "http://localhost:3000",
         "http://145.79.0.94:83",
-        "http://localhost:5173",     
-        "http://145.79.0.94:81"
-              
-    ]
+        "http://145.79.0.94:81",
+    ],
 )
+# Allow local frontend development on any port
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https?://localhost:3000$",
-    r"^https?://localhost:5173$",
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+
+    # Allow tenant subdomains
     r"^https?://([a-z0-9-]+\.)?qualion\.com$",
+
+    # Existing frontend deployments
     r"^https?://145\.79\.0\.94:83$",
     r"^https?://145\.79\.0\.94:81$",
 ]
+
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------

@@ -1915,10 +1915,13 @@ class LoginAPIView(APIView):
 
     @extend_schema(request=LoginSerializer)
     def post(self, request, *args, **kwargs):
+        from competency.models import ProfessionalScope
+        from rest_framework import serializers as drf_serializers
+
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         user = serializer.validated_data["user"]
+
         user.last_login = timezone.now()
         user.save(update_fields=["last_login", "updated_at"])
 
@@ -1937,25 +1940,53 @@ class LoginAPIView(APIView):
                 "status": user.tenant.status,
             }
 
-        professional_profile = ProfessionalProfile.objects.filter(user=user).first()
-        profile_payload = {
-            "id": user.id,
-            "public_id": str(user.public_id),
-            "first_name": professional_profile.first_name if professional_profile else "",
-            "last_name": professional_profile.last_name if professional_profile else "",
-        }
+        professional = ProfessionalProfile.objects.filter(user=user).first()
+        scopes = list(
+            ProfessionalScope.objects.filter(professional=professional)
+            .select_related("scope", "current_qualion_level", "current_authority_status")
+            .order_by("id")
+        ) if professional else []
 
-        return Response(
-            {
-                "status": "success",
-                "tenant": tenant_payload,
-                "role": [role.name for role in user.role.all()],
-                "is_candidate": user.is_candidate,
-                "is_mentor": user.is_mentor,
-                "user": profile_payload,
-            },
-            status=status.HTTP_200_OK,
+        classifications = {s.current_classification for s in scopes}
+        is_candidate = "CANDIDATE" in classifications
+        is_mentor = "MENTOR" in classifications
+        classification = (
+            "BOTH" if is_candidate and is_mentor else
+            "CANDIDATE" if is_candidate else
+            "MENTOR" if is_mentor else "UNCLASSIFIED"
         )
+
+        class ProfessionalScopeLoginSerializer(drf_serializers.ModelSerializer):
+            class Meta:
+                model = ProfessionalScope
+                fields = "__all__"
+
+        account_payload = UserTblSerializer(user).data
+        account_payload["is_candidate"] = is_candidate
+        account_payload["is_mentor"] = is_mentor
+
+        profile_payload = ProfessionalProfileSerializer(professional).data if professional else None
+        scope_payload = ProfessionalScopeLoginSerializer(scopes, many=True).data
+
+        return Response({
+            "status": "success",
+            "tenant": tenant_payload,
+            "role": [role.name for role in user.role.all()],
+            "user_id": user.id,
+            "professional_id": professional.id if professional else None,
+            "classification": classification,
+            "is_candidate": is_candidate,
+            "is_mentor": is_mentor,
+            "accounts": account_payload,
+            "professional_profile": profile_payload,
+            "professional_scopes": scope_payload,
+            "user": {
+                "id": user.id,
+                "public_id": str(user.public_id),
+                "first_name": professional.first_name if professional else "",
+                "last_name": professional.last_name if professional else "",
+            },
+        }, status=status.HTTP_200_OK)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class LogoutAPIView(APIView):

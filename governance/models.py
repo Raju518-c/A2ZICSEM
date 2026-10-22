@@ -756,30 +756,17 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
     # DEPLOYABILITY CONDITIONS
     # ============================================================
 
-    required_credential_types = models.ManyToManyField(
-        "catalog.ReferenceValue",
-        null=True, blank=True,
-        related_name="calculation_rules_required_credentials",
-        help_text=(
-            "Credential types required for deployability. "
-            "Empty means credential type is not checked."
-        ),
-    )
-
     require_active_credential = models.BooleanField(
         default=False,
-        null=True, blank=True,
-        help_text=(
-            "If enabled, at least one matching required credential "
-            "must be active."
-        ),
+        help_text="Require matching credential records to be active.",
     )
 
-    max_days_to_credential_expiry = models.PositiveSmallIntegerField(
-        null=True,
+    active_required_credential_types = models.JSONField(
+        default=list,
         blank=True,
         help_text=(
-            "Optional credential expiry condition used by deployability."
+            "List of CredentialRecord.RecordType codes. Empty disables the type "
+            "requirement. Use CredentialRecord.RecordType.choices in the UI."
         ),
     )
 
@@ -794,6 +781,16 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
         blank=True,
         help_text=(
             "Minimum ethics/independence score required to become Mentor."
+        ),
+    )
+
+    min_industry_experience_months = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Minimum experience in months across the professional's scopes "
+            "in the rule's industry. Used only for Mentor classification. "
+            "Overlapping intervals must not be double counted."
         ),
     )
 
@@ -848,74 +845,37 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
 
     def clean(self):
         super().clean()
+        from professionals.models import CredentialRecord
+        allowed = {code for code, _ in CredentialRecord.RecordType.choices}
+        values = self.active_required_credential_types or []
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) or value not in allowed for value in values
+        ) or len(values) != len(set(values)):
+            raise ValidationError({
+                "active_required_credential_types":
+                "Select distinct valid CredentialRecord.RecordType values."
+            })
 
-        # Qualion's thresholds belong in QualionLevelCondition,
-        # so parent deployability/classification conditions should not
-        # be configured for a QUALION_LEVEL parent.
-        if self.calculation_field_code == self.CalculationField.QUALION_LEVEL:
-            invalid_fields = []
-
-            if self.min_qualion_level_id:
-                invalid_fields.append("min_qualion_level")
-                
-            if self.min_authority_status_id:
-                invalid_fields.append("min_authority_status")
-
-            if self.min_ethics_independence_score is not None:
-                invalid_fields.append("min_ethics_independence_score")
-
-            if self.require_latest_assessment_decision:
-                invalid_fields.append("require_latest_assessment_decision")
-
-            if self.block_if_pending_rejection:
-                invalid_fields.append("block_if_pending_rejection")
-
-            if self.require_active_credential:
-                invalid_fields.append("require_active_credential")
-
-            if self.max_days_to_credential_expiry is not None:
-                invalid_fields.append("max_days_to_credential_expiry")
-
-            if invalid_fields:
-                raise ValidationError({
-                    field: "This condition is not applicable to QUALION_LEVEL."
-                    for field in invalid_fields
-                })
-
-        # Deployability doesn't use assessment/classification-only conditions.
-        if self.calculation_field_code == self.CalculationField.DEPLOYABILITY_FLAG:
-            invalid_fields = []
-
-            if self.min_ethics_independence_score is not None:
-                invalid_fields.append("min_ethics_independence_score")
-
-            if self.require_latest_assessment_decision:
-                invalid_fields.append("require_latest_assessment_decision")
-
-            if self.block_if_pending_rejection:
-                invalid_fields.append("block_if_pending_rejection")
-
-            if invalid_fields:
-                raise ValidationError({
-                    field: "This condition is only applicable to Mentor classification."
-                    for field in invalid_fields
-                })
-
-        # Classification doesn't use credential/deployability-only conditions.
-        if self.calculation_field_code == self.CalculationField.CANDIDATE_MENTOR_CLASSIFICATION:
-            invalid_fields = []
-
-            if self.require_active_credential:
-                invalid_fields.append("require_active_credential")
-
-            if self.max_days_to_credential_expiry is not None:
-                invalid_fields.append("max_days_to_credential_expiry")
-
-            if invalid_fields:
-                raise ValidationError({
-                    field: "This condition is only applicable to Deployability."
-                    for field in invalid_fields
-                })
+        code = self.calculation_field_code
+        invalid = []
+        if code == self.CalculationField.QUALION_LEVEL:
+            if self.min_qualion_level_id: invalid.append("min_qualion_level")
+            if self.min_authority_status_id: invalid.append("min_authority_status")
+            if self.min_ethics_independence_score is not None: invalid.append("min_ethics_independence_score")
+            if self.min_industry_experience_months is not None: invalid.append("min_industry_experience_months")
+            if self.require_latest_assessment_decision: invalid.append("require_latest_assessment_decision")
+            if self.block_if_pending_rejection: invalid.append("block_if_pending_rejection")
+            if self.require_active_credential: invalid.append("require_active_credential")
+            if values: invalid.append("active_required_credential_types")
+        elif code == self.CalculationField.DEPLOYABILITY_FLAG:
+            if self.min_industry_experience_months is not None: invalid.append("min_industry_experience_months")
+            if self.require_latest_assessment_decision: invalid.append("require_latest_assessment_decision")
+            if self.block_if_pending_rejection: invalid.append("block_if_pending_rejection")
+        elif code == self.CalculationField.CANDIDATE_MENTOR_CLASSIFICATION:
+            if self.require_active_credential: invalid.append("require_active_credential")
+            if values: invalid.append("active_required_credential_types")
+        if invalid:
+            raise ValidationError({field: "Not applicable to this calculation type." for field in invalid})
 
     def validate_rule_target(self):
         """
@@ -1067,21 +1027,15 @@ class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
     )
 
 
-    required_credential_types = models.ManyToManyField(
-        "catalog.ReferenceValue",
+    active_required_credential_types = models.JSONField(
+        default=list,
         blank=True,
-        related_name="qualion_level_conditions_required_credentials",
-        help_text=(
-            "At least one of these credential types must be held. "
-            "Empty means credentials are not checked for this level."
-        ),
+        help_text="List of CredentialRecord.RecordType codes for this level.",
     )
 
     require_active_credential = models.BooleanField(
         default=False,
-        help_text=(
-            "If enabled, the matching credential must currently be active."
-        ),
+        help_text="Require matching credential records to be active.",
     )
 
     is_active = models.BooleanField(
@@ -1102,34 +1056,21 @@ class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
 
     def clean(self):
         super().clean()
-
-        if (self.calculation_rule_id and self.calculation_rule.calculation_field_code != CalculationRule.CalculationField.QUALION_LEVEL):
+        from professionals.models import CredentialRecord
+        allowed = {code for code, _ in CredentialRecord.RecordType.choices}
+        values = self.active_required_credential_types or []
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) or value not in allowed for value in values
+        ) or len(values) != len(set(values)):
             raise ValidationError({
-                "calculation_rule": (
-                    "QualionLevelCondition can only belong to a "
-                    "QUALION_LEVEL CalculationRule."
-                )
+                "active_required_credential_types":
+                "Select distinct valid CredentialRecord.RecordType values."
             })
-        # if (self.min_calendar_experience_months is not None and self.max_calendar_experience_months is not None and self.min_calendar_experience_months > self.max_calendar_experience_months):
-        #     raise ValidationError({
-        #         "max_calendar_experience_months": (
-        #             "Maximum experience cannot be less than minimum experience."
-        #         )
-        #     })
-
-        # if (self.min_verified_field_days is not None and self.max_verified_field_days is not None and self.min_verified_field_days > self.max_verified_field_days):
-        #     raise ValidationError({
-        #         "max_verified_field_days": (
-        #             "Maximum field days cannot be less than minimum field days."
-        #         )
-        #     })
-
-        # if (self.min_verified_project_count is not None and self.max_verified_project_count is not None and self.min_verified_project_count > self.max_verified_project_count):
-        #     raise ValidationError({
-        #         "max_verified_project_count": (
-        #             "Maximum project count cannot be less than minimum project count."
-        #         )
-        #     })
+        if (self.calculation_rule_id and
+            self.calculation_rule.calculation_field_code != CalculationRule.CalculationField.QUALION_LEVEL):
+            raise ValidationError({
+                "calculation_rule": "Only QUALION_LEVEL rules can have level conditions."
+            })
 
     def __str__(self):
         return f"{self.calculation_rule.label} - {self.qualion_level}"

@@ -45,14 +45,36 @@ class CalculationRuleSetSerializer(serializers.ModelSerializer):
 
 
 
+from professionals.models import CredentialRecord
+
+CREDENTIAL_CODES = {code for code, _ in CredentialRecord.RecordType.choices}
+
+
+def validate_credential_codes(value):
+    if not isinstance(value, list) or len(value) != len(set(value)) or any(
+        not isinstance(code, str) or code not in CREDENTIAL_CODES for code in value
+    ):
+        raise serializers.ValidationError("Select distinct valid CredentialRecord.RecordType codes.")
+    return value
+
+
 class QualionLevelConditionSerializer(serializers.ModelSerializer):
+    active_required_credential_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=CredentialRecord.RecordType.choices), required=False
+    )
 
     class Meta:
         model = QualionLevelCondition
         fields = "__all__"
 
+    def validate_active_required_credential_types(self, value):
+        return validate_credential_codes(value)
+
 
 class CalculationRuleCombinedSerializer(serializers.ModelSerializer):
+    active_required_credential_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=CredentialRecord.RecordType.choices), required=False
+    )
 
     qualion_level_conditions = QualionLevelConditionSerializer(
         many=True,
@@ -80,13 +102,22 @@ class CalculationRuleCombinedSerializer(serializers.ModelSerializer):
     class Meta:
         model = CalculationRule
         fields = "__all__"
+
+    def validate_active_required_credential_types(self, value):
+        return validate_credential_codes(value)
         
         
 class CalculationRuleSerializer(serializers.ModelSerializer):
+    active_required_credential_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=CredentialRecord.RecordType.choices), required=False
+    )
 
     class Meta:
         model = CalculationRule
         fields = "__all__"
+
+    def validate_active_required_credential_types(self, value):
+        return validate_credential_codes(value)
         read_only_fields = (
             "created_at",
             "updated_at",

@@ -4816,31 +4816,19 @@ def get_credential_expiry_date(credential):
     return None
 
 
-def credential_requirements_satisfied(required_types, require_active, professional_scope, credentials, max_days_to_expiry=None):
-    required_types = list(required_types)
-    if not required_types:
+def credential_requirements_satisfied(required_types, require_active, professional_scope, credentials):
+    """Selected codes use ANY matching type; active flag applies to matching record."""
+    allowed = set(required_types or [])
+    if not allowed and not require_active:
         return True
-
-    today = timezone.localdate()
-
     for credential in credentials:
         if not credential_matches_scope(credential, professional_scope):
             continue
-        if not any(credential_type_matches(credential, required_type) for required_type in required_types):
+        if allowed and str(getattr(credential, "record_type", "")) not in allowed:
             continue
         if require_active and not credential_is_active(credential):
             continue
-
-        if max_days_to_expiry is not None:
-            expiry_date = get_credential_expiry_date(credential)
-            if expiry_date is None:
-                continue
-            days_remaining = (expiry_date - today).days
-            if days_remaining < 0 or days_remaining > max_days_to_expiry:
-                continue
-
         return True
-
     return False
 
 
@@ -4932,8 +4920,8 @@ def evaluate_qualion_condition(condition, calculation_rule, professional_scope, 
             )
         )
 
-    required_types = list(condition.required_credential_types.all())
-    if required_types:
+    required_types = condition.active_required_credential_types or []
+    if required_types or condition.require_active_credential:
         checks.append(credential_requirements_satisfied(required_types, condition.require_active_credential, professional_scope, credentials))
 
     # An empty Qualion condition must not accidentally promote a user.
@@ -4950,7 +4938,7 @@ def get_ordered_qualion_conditions(calculation_rule):
     conditions = list(
         calculation_rule.qualion_level_conditions.filter(is_active=True)
         .select_related("qualion_level", "qualion_level__option_set", "min_authority_status", "min_complexity_rating")
-        .prefetch_related("required_credential_types")
+
     )
 
     # Only active QUALION_LEVEL master values participate.
@@ -5014,17 +5002,21 @@ def evaluate_deployability_rule(rule, professional_scope, credentials):
             )
         )
 
-    required_types = list(rule.required_credential_types.all())
-    if required_types:
+    required_types = rule.active_required_credential_types or []
+    if required_types or rule.require_active_credential:
         checks.append(
             credential_requirements_satisfied(
                 required_types,
                 rule.require_active_credential,
                 professional_scope,
                 credentials,
-                max_days_to_expiry=rule.max_days_to_credential_expiry,
             )
         )
+
+    if rule.min_ethics_independence_score is not None:
+        assessment = get_latest_assessment(professional_scope)
+        score = getattr(assessment, "ethics_independence_score", None) if assessment else None
+        checks.append(score is not None and score >= rule.min_ethics_independence_score)
 
     if not checks:
         return False
@@ -5038,6 +5030,35 @@ def evaluate_deployability_rule(rule, professional_scope, credentials):
 # ============================================================
 # CANDIDATE / MENTOR CLASSIFICATION
 # ============================================================
+
+def get_industry_experience_months(rule, professional_scope, profile):
+    """Union of verified project periods across scopes in applicable industry."""
+    from experience.models import ProjectScope
+    industry_ids = set(rule.industry.values_list("pk", flat=True))
+    if not industry_ids and professional_scope.scope_id:
+        industry_ids.add(professional_scope.scope.industry_id)
+    if not industry_ids:
+        return 0
+    scope_ids = set(ScopeCatalog.objects.filter(industry_id__in=industry_ids).values_list("pk", flat=True))
+    if rule.scope.exists():
+        scope_ids &= set(rule.scope.values_list("pk", flat=True)) if not rule.industry.exists() else scope_ids
+    verified = ProjectScope.objects.filter(project__professional=profile, scope_id__in=scope_ids, verification_status__in=VERIFIED_STATES).select_related("project")
+    intervals = []
+    for ps in verified:
+        project = getattr(ps, "project", None)
+        if project and project.start_date:
+            intervals.append((project.start_date, project.end_date or timezone.localdate()))
+    if not intervals:
+        return 0
+    intervals.sort(key=lambda item: item[0])
+    merged = [list(intervals[0])]
+    for start, end in intervals[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return max(0, round(sum((end - start).days for start, end in merged) / 30.44))
+
 
 def evaluate_classification_rule(rule, professional_scope, profile):
     if rule is None:
@@ -5063,6 +5084,9 @@ def evaluate_classification_rule(rule, professional_scope, profile):
                 expected_option_type=AUTHORITY_OPTION_TYPE,
             )
         )
+
+    if rule.min_industry_experience_months is not None:
+        checks.append(get_industry_experience_months(rule, professional_scope, profile) >= rule.min_industry_experience_months)
 
     latest_assessment = None
     if rule.min_ethics_independence_score is not None or rule.require_latest_assessment_decision:
@@ -5201,13 +5225,11 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             .prefetch_related(
                 "scope",
                 "industry",
-                "required_credential_types",
                 "qualion_level_conditions",
                 "qualion_level_conditions__qualion_level",
                 "qualion_level_conditions__qualion_level__option_set",
                 "qualion_level_conditions__min_authority_status",
                 "qualion_level_conditions__min_complexity_rating",
-                "qualion_level_conditions__required_credential_types",
             )
             .order_by("calculation_field_code", "pk")
         )
@@ -5387,49 +5409,14 @@ class CalculationRuleCombinedListCreateAPIView(APIView):
         for item in new_conditions:
 
             credential_types = item.pop(
-                "required_credential_types",
                 []
             )
 
-            condition = QualionLevelCondition.objects.create(
-                calculation_rule=rule,
-                tenant=rule.tenant,
-
-                qualion_level_id=item.get("qualion_level"),
-
-                min_calendar_experience_months=item.get(
-                    "min_calendar_experience_months"
-                ),
-                min_verified_field_days=item.get(
-                    "min_verified_field_days"
-                ),
-                min_verified_project_count=item.get(
-                    "min_verified_project_count"
-                ),
-
-                min_authority_status_id=item.get(
-                    "min_authority_status"
-                ) or None,
-
-                min_complexity_rating_id=item.get(
-                    "min_complexity_rating"
-                ) or None,
-
-                require_active_credential=item.get(
-                    "require_active_credential",
-                    False,
-                ),
-
-                is_active=  item.get(
-                    "is_active",
-                    True,
-                ),
-            )
-
-            if credential_types:
-                condition.required_credential_types.set(
-                    credential_types
-                )
+            condition_serializer = QualionLevelConditionSerializer(data={
+                **item, "calculation_rule": rule.pk, "tenant": rule.tenant_id,
+            })
+            condition_serializer.is_valid(raise_exception=True)
+            condition_serializer.save()
 
         rule.validate_rule_target()
 
@@ -5565,55 +5552,15 @@ class CalculationRuleCombinedRetrieveUpdateAPIView(APIView):
         for item in new_conditions:
 
             credential_types = item.pop(
-                "required_credential_types",
                 []
             )
 
-            # condition = QualionLevelCondition.objects.create(
-            #     calculation_rule=rule,
-            #     tenant=rule.tenant,
-            #     **item
-            # )
             
-            condition = QualionLevelCondition.objects.create(
-                calculation_rule=rule,
-                tenant=rule.tenant,
-
-                qualion_level_id=item.get("qualion_level"),
-
-                min_calendar_experience_months=item.get(
-                    "min_calendar_experience_months"
-                ),
-                min_verified_field_days=item.get(
-                    "min_verified_field_days"
-                ),
-                min_verified_project_count=item.get(
-                    "min_verified_project_count"
-                ),
-
-                min_authority_status_id=item.get(
-                    "min_authority_status"
-                ) or None,
-
-                min_complexity_rating_id=item.get(
-                    "min_complexity_rating"
-                ) or None,
-
-                require_active_credential=item.get(
-                    "require_active_credential",
-                    False,
-                ),
-
-                is_active=item.get(
-                    "is_active",
-                    True,
-                ),
-            )
-
-            if credential_types:
-                condition.required_credential_types.set(
-                    credential_types
-                )
+            condition_serializer = QualionLevelConditionSerializer(data={
+                **item, "calculation_rule": rule.pk, "tenant": rule.tenant_id,
+            })
+            condition_serializer.is_valid(raise_exception=True)
+            condition_serializer.save()
 
         if delete_conditions:
 

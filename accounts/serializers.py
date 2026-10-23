@@ -17,7 +17,7 @@ from core.validators import validate_calling_code
 from evidence.serializers import EvidenceDocumentSerializer
 from professionals.serializers import ProfessionalProfileSerializer
 from tenancy.models import Tenant
-
+from competency.models import ProfessionalScope
 
 def _resolve_tenant(tenant_value):
     if not tenant_value:
@@ -142,6 +142,9 @@ class UserTblSerializer(serializers.ModelSerializer):
     registration_application_status = serializers.SerializerMethodField()
     professional_profile_status = serializers.SerializerMethodField()
 
+    classification = serializers.SerializerMethodField()
+    classifications = serializers.SerializerMethodField()
+    
     class Meta:
         model = UserTbl
         fields = "__all__"
@@ -170,6 +173,8 @@ class UserTblSerializer(serializers.ModelSerializer):
         extra_fields = [
             "registration_application_status",
             "professional_profile_status",
+            "classification",
+            "classifications",
         ]
 
         return list(fields) + [
@@ -181,6 +186,43 @@ class UserTblSerializer(serializers.ModelSerializer):
             obj.registration_applications.order_by("-created_at").first()
         )
         return application.status if application else None
+
+    def get_classifications(self, obj):
+        try:
+            profile = obj.professional_profile
+        except ProfessionalProfile.DoesNotExist:
+            return []
+
+        classifications = (
+            ProfessionalScope.objects
+            .filter(professional_id=profile.pk)
+            .exclude(
+                current_classification__in=[
+                    "UNCLASSIFIED", ""
+                ]
+            )
+            .values_list(
+                "current_classification",
+                flat=True
+            )
+            .distinct()
+        )
+
+        return sorted(set(classifications) & {"CANDIDATE", "MENTOR"})
+
+    def get_classification(self, obj):
+        classifications = self.get_classifications(obj)
+
+        if "CANDIDATE" in classifications and "MENTOR" in classifications:
+            return "BOTH"
+
+        if "MENTOR" in classifications:
+            return "MENTOR"
+
+        if "CANDIDATE" in classifications:
+            return "CANDIDATE"
+
+        return "UNCLASSIFIED"
 
     # def get_professional_profile_status(self, obj):
     #     try:

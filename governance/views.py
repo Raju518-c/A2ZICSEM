@@ -5,7 +5,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .models import *
 from .serializers import *
 from datetime import timedelta
@@ -21,6 +21,7 @@ from experience.models import *
 from competency.models import *
 from catalog.models import *
 from .governance_calculation_engine import *
+from rest_framework.exceptions import ValidationError as DRFValidationError
 import uuid
 from datetime import date, datetime
 
@@ -4884,7 +4885,7 @@ def reference_value_response(reference_value):
 # QUALION LEVEL CALCULATION
 # ============================================================
 
-def evaluate_qualion_condition(condition, calculation_rule, professional_scope, credentials):
+def evaluate_qualion_condition(condition, calculation_rule, professional_scope, credentials, evaluation_context="REGISTRATION"):
     checks = []
 
     min_experience = getattr(condition, "min_calendar_experience_months", None)
@@ -4924,6 +4925,11 @@ def evaluate_qualion_condition(condition, calculation_rule, professional_scope, 
     if required_types or condition.require_active_credential:
         checks.append(credential_requirements_satisfied(required_types, condition.require_active_credential, professional_scope, credentials))
 
+    # Compliance is applicable ONLY to promotion eligibility, never registration.
+    if evaluation_context == "PROMOTION" and condition.min_compliance_score is not None:
+        score = professional_scope.compliance_score
+        checks.append(score is not None and score >= condition.min_compliance_score)
+
     # An empty Qualion condition must not accidentally promote a user.
     if not checks:
         return False
@@ -4962,12 +4968,12 @@ def get_ordered_qualion_conditions(calculation_rule):
     return conditions
 
 
-def calculate_qualion_level(calculation_rule, professional_scope, credentials):
+def calculate_qualion_level(calculation_rule, professional_scope, credentials, evaluation_context="REGISTRATION"):
     if calculation_rule is None:
         return None
 
     for condition in get_ordered_qualion_conditions(calculation_rule):
-        if evaluate_qualion_condition(condition, calculation_rule, professional_scope, credentials):
+        if evaluate_qualion_condition(condition, calculation_rule, professional_scope, credentials, evaluation_context=evaluation_context):
             return condition
 
     return None
@@ -5161,10 +5167,13 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
     No request body required.
     """
 
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, pk):
+        evaluation_context = str(request.data.get("evaluation_context", "REGISTRATION")).upper()
+        if evaluation_context not in ("REGISTRATION", "PROMOTION"):
+            return Response({"success": False, "message": "evaluation_context must be REGISTRATION or PROMOTION."}, status=400)
         # ====================================================
         # 1. PROFESSIONAL PROFILE
         # ====================================================
@@ -5172,6 +5181,9 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             profile = ProfessionalProfile.objects.select_for_update().select_related("user", "tenant").get(pk=pk)
         except ProfessionalProfile.DoesNotExist:
             return Response({"success": False, "message": "ProfessionalProfile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_superuser and str(request.user.tenant_id) != str(profile.tenant_id):
+            return Response({"success": False, "message": "Cross-tenant access denied."}, status=403)
 
         # ====================================================
         # 2. PROFESSIONAL SCOPES
@@ -5210,29 +5222,26 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
         # ====================================================
         # 4. ACTIVE RULE CONFIGURATIONS
         # ====================================================
-        all_rules = list(
-            CalculationRule.objects.filter(
-                tenant=profile.tenant,
-                is_active=True,
-                calculation_field_code__in=[QUALION_LEVEL_FIELD, DEPLOYABILITY_FIELD, CLASSIFICATION_FIELD],
-            )
-            .select_related(
-                "min_qualion_level",
-                "min_qualion_level__option_set",
-                "min_authority_status",
-                "min_authority_status__option_set",
-            )
-            .prefetch_related(
-                "scope",
-                "industry",
-                "qualion_level_conditions",
-                "qualion_level_conditions__qualion_level",
-                "qualion_level_conditions__qualion_level__option_set",
-                "qualion_level_conditions__min_authority_status",
-                "qualion_level_conditions__min_complexity_rating",
-            )
-            .order_by("calculation_field_code", "pk")
-        )
+        # Rules are now SuperAdmin-owned and resolved via TenantRuleSelection.
+        # Never query CalculationRule by tenant or by its legacy M2M targets.
+        from governance.master_rule_models import resolve_tenant_rule_selection
+
+        def selected_rule(scope_obj, field_code):
+            selection = resolve_tenant_rule_selection(profile.tenant, scope_obj.scope, field_code)
+            if selection is None:
+                raise DRFValidationError(f"No published tenant rule selection for {field_code} / scope {scope_obj.scope_id}.")
+            master = selection.master_rule_set
+            if master.status != "PUBLISHED" or master.calculation_field_code != field_code:
+                raise DRFValidationError("Invalid or unpublished selected master rule set.")
+            if master.effective_from and master.effective_from > timezone.localdate():
+                raise DRFValidationError("Master rule is not yet effective.")
+            if master.effective_to and master.effective_to < timezone.localdate():
+                raise DRFValidationError("Master rule has expired.")
+            rules = list(CalculationRule.objects.filter(master_rule_set=master, is_active=True,
+                        calculation_field_code=field_code).prefetch_related("qualion_level_conditions"))
+            if len(rules) != 1:
+                raise DRFValidationError(f"Expected exactly one active {field_code} rule in master set {master.pk}; found {len(rules)}.")
+            return selection, rules[0]
 
         scope_results = []
 
@@ -5247,8 +5256,8 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # A. QUALION LEVEL: check configured levels by sort_order (highest -> lowest)
             # ------------------------------------------------
-            qualion_rule = get_rule_for_scope(all_rules, QUALION_LEVEL_FIELD, professional_scope)
-            matched_qualion_condition = calculate_qualion_level(qualion_rule, professional_scope, credentials)
+            qualion_selection, qualion_rule = selected_rule(professional_scope, QUALION_LEVEL_FIELD)
+            matched_qualion_condition = calculate_qualion_level(qualion_rule, professional_scope, credentials, evaluation_context=evaluation_context)
 
             if matched_qualion_condition:
                 professional_scope.current_qualion_level = matched_qualion_condition.qualion_level
@@ -5260,7 +5269,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # B. DEPLOYABILITY: pass => DEPLOYABLE, fail => NOT_DEPLOYABLE
             # ------------------------------------------------
-            deployability_rule = get_rule_for_scope(all_rules, DEPLOYABILITY_FIELD, professional_scope)
+            deployability_selection, deployability_rule = selected_rule(professional_scope, DEPLOYABILITY_FIELD)
             deployability_passed = evaluate_deployability_rule(deployability_rule, professional_scope, credentials)
             professional_scope.is_deployable = (
                 ProfessionalScope.DeployabilityStatus.DEPLOYABLE
@@ -5271,7 +5280,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # C. CLASSIFICATION: pass => MENTOR, fail => CANDIDATE
             # ------------------------------------------------
-            classification_rule = get_rule_for_scope(all_rules, CLASSIFICATION_FIELD, professional_scope)
+            classification_selection, classification_rule = selected_rule(professional_scope, CLASSIFICATION_FIELD)
 
             if classification_rule is None:
                 professional_scope.current_classification = ProfessionalScope.Classification.UNCLASSIFIED
@@ -5287,7 +5296,16 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # SAVE ALL 3 VALUES TO PROFESSIONAL SCOPE
             # ------------------------------------------------
-            professional_scope.save(update_fields=["current_qualion_level", "is_deployable", "current_classification", "updated_at"])
+            calculated_qualion = professional_scope.current_qualion_level
+            calculated_deployability = professional_scope.is_deployable
+            calculated_classification = professional_scope.current_classification
+            if evaluation_context == "PROMOTION":
+                # Read-only eligibility evaluation. Approval workflow owns level changes.
+                professional_scope.current_qualion_level = previous_qualion
+                professional_scope.is_deployable = previous_deployability
+                professional_scope.current_classification = previous_classification
+            else:
+                professional_scope.save(update_fields=["current_qualion_level", "is_deployable", "current_classification", "updated_at"])
 
             scope_results.append(
                 {
@@ -5298,26 +5316,32 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                     "industry": getattr(professional_scope.scope.industry, "label", str(professional_scope.scope.industry)),
                     "qualion_level": {
                         "previous": reference_value_response(previous_qualion),
-                        "calculated": reference_value_response(professional_scope.current_qualion_level),
+                        "calculated": reference_value_response(calculated_qualion),
                         "checked_order": "sort_order DESC",
                         "matched_condition_id": matched_qualion_condition.pk if matched_qualion_condition else None,
-                        "calculation_rule_id": qualion_rule.pk if qualion_rule else None,
+                        "calculation_rule_id": qualion_rule.pk,
+                        "tenant_rule_selection_id": qualion_selection.pk,
+                        "master_rule_set_id": qualion_selection.master_rule_set_id,
                         "calculation_rule": qualion_rule.label if qualion_rule else None,
                         "requires_four_eyes_approval": qualion_rule.requires_four_eyes_approval if qualion_rule else False,
                     },
                     "deployability": {
                         "previous": previous_deployability,
-                        "calculated": professional_scope.is_deployable,
+                        "calculated": calculated_deployability,
                         "conditions_passed": deployability_passed,
-                        "calculation_rule_id": deployability_rule.pk if deployability_rule else None,
+                        "calculation_rule_id": deployability_rule.pk,
+                        "tenant_rule_selection_id": deployability_selection.pk,
+                        "master_rule_set_id": deployability_selection.master_rule_set_id,
                         "calculation_rule": deployability_rule.label if deployability_rule else None,
                         "requires_four_eyes_approval": deployability_rule.requires_four_eyes_approval if deployability_rule else False,
                     },
                     "classification": {
                         "previous": previous_classification,
-                        "calculated": professional_scope.current_classification,
+                        "calculated": calculated_classification,
                         "mentor_conditions_passed": classification_passed,
-                        "calculation_rule_id": classification_rule.pk if classification_rule else None,
+                        "calculation_rule_id": classification_rule.pk,
+                        "tenant_rule_selection_id": classification_selection.pk,
+                        "master_rule_set_id": classification_selection.master_rule_set_id,
                         "calculation_rule": classification_rule.label if classification_rule else None,
                         "requires_four_eyes_approval": classification_rule.requires_four_eyes_approval if classification_rule else False,
                     },
@@ -5327,7 +5351,8 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
         # ====================================================
         # 6. UPDATE USER is_candidate / is_mentor
         # ====================================================
-        user_classification = synchronize_user_candidate_mentor_flags(profile, professional_scopes)
+        user_classification = (synchronize_user_candidate_mentor_flags(profile, professional_scopes)
+                               if evaluation_context == "REGISTRATION" else {"status": "unchanged"})
 
         # ====================================================
         # 7. RESPONSE
@@ -5335,6 +5360,8 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
         return Response(
             {
                 "success": True,
+                "evaluation_context": evaluation_context,
+                "persisted": evaluation_context == "REGISTRATION",
                 "message": "Qualion level, deployability and Candidate/Mentor classification calculated successfully for all professional scopes.",
                 "professional_profile_id": str(profile.pk),
                 "user_id": str(profile.user_id),

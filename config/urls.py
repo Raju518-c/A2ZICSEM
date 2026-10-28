@@ -47,6 +47,7 @@ urlpatterns = [
     path("",include("competency.urls")),
     path("",include("resumes.urls")),   
     path("",include("governance.urls")),
+    path("",include("training.urls")),
 ]
 
 if settings.DEBUG:

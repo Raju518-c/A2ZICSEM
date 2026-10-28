@@ -121,6 +121,7 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
         choices=Classification.choices,
         default=Classification.CANDIDATE,
     )
+    compliance_score = models.DecimalField(max_digits=5, decimal_places=2, default=100, help_text="Derived from approved training.CandidateComplianceEvent rows; never client-editable")
     verification_status = models.CharField(
         max_length=30,
         choices=VerificationStatus.choices,

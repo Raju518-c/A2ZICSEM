@@ -641,7 +641,7 @@ class CalculationRuleSet(UUIDModel, TenantOwnedModel, TimeStampedModel):
 
 
 
-class CalculationRule(TenantOwnedModel, TimeStampedModel):
+class CalculationRule(TimeStampedModel):
     """
     Parent configuration for the 3 rule-driven calculated fields.
 
@@ -678,6 +678,12 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
         SUBMITTED = "SUBMITTED", "Submitted"
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
+
+    master_rule_set = models.ForeignKey(
+        "governance.MasterCalculationRuleSet", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="calculation_rules",
+        help_text="Published SuperAdmin master rule set; null for legacy rules.",
+    )
 
     calculation_field_code = models.CharField(
         max_length=50,
@@ -970,7 +976,7 @@ class CalculationRule(TenantOwnedModel, TimeStampedModel):
     def __str__(self):
         return f"{self.tenant} - {self.calculation_field_code} - {self.label}"
 
-class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
+class QualionLevelCondition(TimeStampedModel):
 
     calculation_rule = models.ForeignKey(
         CalculationRule,
@@ -1017,6 +1023,17 @@ class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
         help_text="Minimum authority status required for this Qualion level.",
     )
 
+    min_compliance_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Minimum mentor-verified ProfessionalScope.compliance_score "
+            "required for this Qualion level."
+        )
+    )
+        
     min_complexity_rating = models.ForeignKey(
         "catalog.ReferenceValue",
         on_delete=models.PROTECT,
@@ -1079,3 +1096,9 @@ class QualionLevelCondition(TenantOwnedModel, TimeStampedModel):
 
 
 
+
+# Phase 2: platform-owned rule sets and tenant-selected applications.
+from .master_rule_models import (
+    MasterCalculationRuleSet, MasterRuleAuthorAssignment, TenantRuleSelection,
+)
+from .promotion_models import PromotionRecommendation, PromotionLevelHistory

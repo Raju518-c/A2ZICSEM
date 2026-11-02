@@ -48,24 +48,35 @@ ALLOWED_HOSTS = [
     ".localhost",
     "qualion.com",
     ".qualion.com",
-    "145.79.0.94:83",
-    "145.79.0.94:81",
-    # "qld-comfort-funky-lime.trycloudflare.com",
+    "qualion.technology",
+    ".qualion.technology",
 ]
 
+# Django CSRF supports wildcard subdomains but not wildcard ports.
+# Explicitly trust production frontend origins and common local development ports.
 CSRF_TRUSTED_ORIGINS = [
-    "http://145.79.0.94:82",
-    "http://localhost:3000",
-    "http://*.localhost:3000",
-    "http://localhost:5173",
-    "http://*.localhost:5173",
+    "https://qualion.technology",
+    "https://qualion.technology:82",
+    "http://qualion.technology",
     "http://qualion.com",
     "https://qualion.com",
     "https://*.qualion.com",
-    "http://145.79.0.94:83",
+    "https://*.qualion.technology",
     "http://145.79.0.94:81",
-    # "https://qld-comfort-funky-lime.trycloudflare.com",
+    "http://145.79.0.94:82",
+    "http://145.79.0.94:83",
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    *env_list("CSRF_EXTRA_TRUSTED_ORIGINS"),
 ]
+
+# For CSRF-protected session/cookie POST requests from additional local ports,
+# add the exact origin to CSRF_TRUSTED_ORIGINS. CORS regex below already covers
+# every local port, including 3001, 3002 and 5003.
 
 
 # ---------------------------------------------------------------------------
@@ -316,42 +327,28 @@ SPECTACULAR_SETTINGS = {
 # CORS
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = env_list(
-    "CORS_ALLOWED_ORIGINS",
-    [
-        "http://145.79.0.94:83",
-        "http://145.79.0.94:81",
-    ],
-)
-# Allow local frontend development on any port
+# Exact frontend origins; extra origins may be supplied through .env.
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys([
+    "https://qualion.technology",
+    "https://qualion.technology:82",
+    "http://qualion.technology",
+    "https://qualion.com",
+    "http://qualion.com",
+    "http://145.79.0.94:81",
+    "http://145.79.0.94:82",
+    "http://145.79.0.94:83",
+    *env_list("CORS_ALLOWED_ORIGINS"),
+]))
+
+# Localhost and 127.0.0.1 on ANY port (3000, 3001, 5003, etc.).
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-
-    # Allow tenant subdomains
-    r"^https?://([a-z0-9-]+\.)?qualion\.com$",
-
-    # Existing frontend deployments
-    r"^https?://145\.79\.0\.94:83$",
-    r"^https?://145\.79\.0\.94:81$",
+    r"^https?://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?$",
+    r"^https?://([a-z0-9-]+\.)+qualion\.com$",
+    r"^https://([a-z0-9-]+\.)+qualion\.technology$",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",
-#     "http://localhost:5173",
-#     "http://127.0.0.1:3000",
-#     "http://127.0.0.1:5173",
-#     "http://145.79.0.94:83",
-#     "http://145.79.0.94:81",
-# ]
-
-# CORS_ALLOWED_ORIGIN_REGEXES = [
-#     r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-#     r"^https?://([a-z0-9-]+\.)?qualion\.com$",
-# ]
-
-# CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------

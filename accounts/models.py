@@ -338,6 +338,8 @@ class RegistrationApplication(TimeStampedModel, UUIDModel):
         "tenancy.Tenant",
         on_delete=models.PROTECT,
         related_name="registration_applications",
+        null=True,
+        blank=True,
         db_index=True,
         help_text="Tenant receiving the registration. Derived from the "
         "permanent tenant URL; cannot be changed by request payload.",
@@ -474,6 +476,8 @@ class ConsentRecord(CreatedOnlyModel):
         "tenancy.Tenant",
         on_delete=models.PROTECT,
         related_name="consent_records",
+        null=True,
+        blank=True,
         db_index=True,
         help_text="Same tenant as user and professional.",
     )

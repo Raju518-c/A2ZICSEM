@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F
 from django.utils import timezone
 from rest_framework import serializers
-from professionals.models import ProfessionalProfile
+from professionals.models import ProfessionalProfile, ProfessionalReview
 from accounts.models import (
     ConsentRecord,
     OTPVerification,
@@ -17,7 +17,7 @@ from core.validators import validate_calling_code
 from evidence.serializers import EvidenceDocumentSerializer
 from professionals.serializers import ProfessionalProfileSerializer
 from tenancy.models import Tenant
-from competency.models import ProfessionalScope
+
 
 def _resolve_tenant(tenant_value):
     if not tenant_value:
@@ -51,9 +51,10 @@ def _resolve_user(tenant_value, email):
         users = list(UserTbl.objects.filter(tenant=tenant, email__iexact=email))
     else:
         users = list(
-            UserTbl.objects.filter(email__iexact=email, role__roles_for="super admin")
+            UserTbl.objects.filter(tenant__isnull=True, email__iexact=email)
         )
-
+    print('users', [user.pk for user in users])
+    
     if len(users) == 1:
         return users[0]
     return None
@@ -142,9 +143,6 @@ class UserTblSerializer(serializers.ModelSerializer):
     registration_application_status = serializers.SerializerMethodField()
     professional_profile_status = serializers.SerializerMethodField()
 
-    classification = serializers.SerializerMethodField()
-    classifications = serializers.SerializerMethodField()
-    
     class Meta:
         model = UserTbl
         fields = "__all__"
@@ -173,8 +171,6 @@ class UserTblSerializer(serializers.ModelSerializer):
         extra_fields = [
             "registration_application_status",
             "professional_profile_status",
-            "classification",
-            "classifications",
         ]
 
         return list(fields) + [
@@ -187,58 +183,13 @@ class UserTblSerializer(serializers.ModelSerializer):
         )
         return application.status if application else None
 
-    def get_classifications(self, obj):
-        try:
-            profile = obj.professional_profile
-        except ProfessionalProfile.DoesNotExist:
-            return []
-
-        classifications = (
-            ProfessionalScope.objects
-            .filter(professional_id=profile.pk)
-            .exclude(
-                current_classification__in=[
-                    "UNCLASSIFIED", ""
-                ]
-            )
-            .values_list(
-                "current_classification",
-                flat=True
-            )
-            .distinct()
-        )
-
-        return sorted(set(classifications) & {"CANDIDATE", "MENTOR"})
-
-    def get_classification(self, obj):
-        classifications = self.get_classifications(obj)
-
-        if "CANDIDATE" in classifications and "MENTOR" in classifications:
-            return "BOTH"
-
-        if "MENTOR" in classifications:
-            return "MENTOR"
-
-        if "CANDIDATE" in classifications:
-            return "CANDIDATE"
-
-        return "UNCLASSIFIED"
-
-    # def get_professional_profile_status(self, obj):
-    #     try:
-    #         return obj.professional_profile.profile_status
-    #     except ProfessionalProfile.DoesNotExist:
-    #         return None
-    
     def get_professional_profile_status(self, obj):
         try:
             profile = obj.professional_profile
         except ProfessionalProfile.DoesNotExist:
-            return None
+            return -1
 
-        if not ProfessionalReview.objects.filter(
-            professional_id=profile.pk
-        ).exists():
+        if not ProfessionalReview.objects.filter(professional_id=profile.pk).exists():
             return None
 
         return profile.profile_status
@@ -385,90 +336,142 @@ class ConsentRecordSerializer(serializers.ModelSerializer):
         return attrs        
 
 
+# class LoginSerializer(serializers.Serializer):
+#     tenant = serializers.CharField(
+#         required=False,
+#         allow_blank=True,
+#         allow_null=True,
+#         help_text="Tenant id or portal slug used for tenant-scoped login.",
+#     )    
+#     email = serializers.EmailField()
+#     password = serializers.CharField(trim_whitespace=False)
+
+#     def _resolve_tenant(self, tenant_value):
+#         if not tenant_value:
+#             return None
+
+#         tenant_value = str(tenant_value).strip()
+#         if not tenant_value:
+#             return None
+
+#         tenant = None
+#         for lookup in (
+#             {"public_id": tenant_value},
+#             {"id": tenant_value},
+#             {"portal_slug": tenant_value},
+#         ):
+#             if tenant:
+#                 break
+#             try:
+#                 tenant = Tenant.objects.filter(**lookup).first()
+#             except (ValueError, ValidationError):
+#                 continue
+
+#         return tenant
+
+#     def validate(self, attrs):
+#         tenant_value = (attrs.get("tenant") or "").strip()
+#         email = (attrs.get("email") or "").strip().lower()
+#         password = attrs.get("password") or ""
+
+#         # Tenant-scoped login is unchanged. Omitted/null tenant means Qualion.
+#         tenant = self._resolve_tenant(tenant_value) if tenant_value else None
+#         if tenant_value and tenant is None:
+#             raise serializers.ValidationError({"tenant": ["Tenant not found."]})
+
+#         users = list(
+#             UserTbl.objects.filter(
+#                 tenant=tenant, email__iexact=email
+#             ).distinct()
+#         )
+
+#         if not users:
+#             raise serializers.ValidationError({"email": ["Invalid credentials."]})
+
+#         if len(users) > 1:
+#             raise serializers.ValidationError(
+#                 {
+#                     "email": [
+#                         "Multiple accounts matched this email for this login context."
+#                     ]
+#                 }
+#             )
+
+#         user = users[0]
+
+#         # PENDING_APPROVAL, APPROVED and REJECTED may all log in — a
+#         # rejected candidate still needs to reach their account to see the
+#         # rejection reason via registration-status/stage2_status. Only
+#         # SUSPENDED is blocked (that's the deliberate account lock-out
+#         # state, distinct from a rejection decision).
+#         if user.approval_status == UserTbl.ApprovalStatus.SUSPENDED:
+#             raise serializers.ValidationError(
+#                 {"email": ["This account is not allowed to login."]}
+#             )
+
+#         if not user.is_active:
+#             raise serializers.ValidationError({"email": ["This account is inactive."]})
+
+#         if not user.check_password(password):
+#             raise serializers.ValidationError({"password": ["Invalid credentials."]})
+
+#         attrs["user"] = user
+#         return attrs
+
+
 class LoginSerializer(serializers.Serializer):
     tenant = serializers.CharField(
         required=False,
         allow_blank=True,
         allow_null=True,
-        help_text="Tenant id or portal slug used for tenant-scoped login.",
-    )    
+        help_text="Tenant ID, public ID, or portal slug. Null for Qualion."
+    )
     email = serializers.EmailField()
-    password = serializers.CharField(trim_whitespace=False)
-
-    def _resolve_tenant(self, tenant_value):
-        if not tenant_value:
-            return None
-
-        tenant_value = str(tenant_value).strip()
-        if not tenant_value:
-            return None
-
-        tenant = None
-        for lookup in (
-            {"public_id": tenant_value},
-            {"id": tenant_value},
-            {"portal_slug": tenant_value},
-        ):
-            if tenant:
-                break
-            try:
-                tenant = Tenant.objects.filter(**lookup).first()
-            except (ValueError, ValidationError):
-                continue
-
-        return tenant
+    password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False
+    )
 
     def validate(self, attrs):
-        tenant_value = (attrs.get("tenant") or "").strip()
-        email = (attrs.get("email") or "").strip().lower()
-        password = attrs.get("password") or ""
+        tenant_value = attrs.get("tenant")
+        email = attrs["email"].strip().lower()
+        password = attrs["password"]
 
-        tenant = self._resolve_tenant(tenant_value) if tenant_value else None
+        if tenant_value not in (None, "", "null", "qualion"):
+            tenant = _resolve_tenant(tenant_value)
+            if tenant is None:
+                raise serializers.ValidationError({
+                    "tenant": ["Invalid tenant."]
+                })
 
-        if tenant is not None:
-            users = list(UserTbl.objects.filter(tenant=tenant, email__iexact=email))
-        else:
-            users = list(
-                UserTbl.objects.filter(
-                    email__iexact=email,
-                    role__roles_for="super admin",
-                )
-            )
+        print('tenant_value', tenant_value)
+        print('email', email)
+        user = _resolve_user(tenant_value, email)
+        print('user', user)
 
-        if not users:
-            raise serializers.ValidationError({"email": ["Invalid credentials."]})
+        if user is None:
+            raise serializers.ValidationError({
+                "email": ["Invalid credentials."]
+            })
 
-        if len(users) > 1:
-            raise serializers.ValidationError(
-                {
-                    "email": [
-                        "Multiple super admin accounts matched this email. Please provide tenant credentials instead."
-                    ]
-                }
-            )
-
-        user = users[0]
-
-        if not user:
-            raise serializers.ValidationError({"email": ["Invalid credentials."]})        
-
-        # PENDING_APPROVAL, APPROVED and REJECTED may all log in — a
-        # rejected candidate still needs to reach their account to see the
-        # rejection reason via registration-status/stage2_status. Only
-        # SUSPENDED is blocked (that's the deliberate account lock-out
-        # state, distinct from a rejection decision).
         if user.approval_status == UserTbl.ApprovalStatus.SUSPENDED:
-            raise serializers.ValidationError(
-                {"email": ["This account is not allowed to login."]}
-            )
+            raise serializers.ValidationError({
+                "email": ["This account is not allowed to login."]
+            })
 
         if not user.is_active:
-            raise serializers.ValidationError({"email": ["This account is inactive."]})
+            raise serializers.ValidationError({
+                "email": ["This account is inactive."]
+            })
 
         if not user.check_password(password):
-                    raise serializers.ValidationError({"password": ["Invalid credentials."]})
+            raise serializers.ValidationError({
+                "password": ["Invalid credentials."]
+            })
 
         attrs["user"] = user
+        attrs["login_type"] = "tenant" if user.tenant_id is not None else "qualion"
+
         return attrs
 
 

@@ -121,7 +121,7 @@ class ProfessionalScope(TenantOwnedModel, TimeStampedModel):
         choices=Classification.choices,
         default=Classification.CANDIDATE,
     )
-    compliance_score = models.DecimalField(max_digits=5, decimal_places=2, default=100, help_text="Derived from approved training.CandidateComplianceEvent rows; never client-editable")
+    compliance_score = models.DecimalField(max_digits=5, decimal_places=2, default=100, help_text="One current compliance score per professional scope (0-100). Updated only through authorised mentor verification of a client performance review.")
     verification_status = models.CharField(
         max_length=30,
         choices=VerificationStatus.choices,
@@ -216,7 +216,7 @@ class CompetencyAssessment(TenantOwnedModel, CreatedOnlyModel):
         null=True,
         blank=True,
         decimal_places=2,
-        help_text="Ethics and independence dimension; threshold may block progression.",
+        help_text="DEPRECATED: not used for rule eligibility. Use ProfessionalScope.compliance_score.",
     )
     communication_conduct_score = models.DecimalField(
         max_digits=5, null=True, blank=True, decimal_places=2, help_text="Communication and professional conduct dimension."

@@ -176,13 +176,18 @@ class EmploymentRecordListCreateAPIView(APIView):
 
         for record in employment_records:
             record["professional"] = professional_id
-            record["tenant"] = professional.tenant_id
+            record.pop("tenant", None)
 
-        serializer = EmploymentRecordSerializer(data=employment_records, many=True)
+        serializer = EmploymentRecordSerializer(
+            data=employment_records,
+            many=True,
+        )        
 
         if serializer.is_valid():
             with transaction.atomic():
-                created_records = serializer.save()
+                created_records = serializer.save(
+                    tenant_id=professional.tenant_id
+                )
 
                 for index, employment_record in enumerate(created_records):
                     evidence_file = request.FILES.get(f"evidence_{index}")
@@ -446,14 +451,6 @@ class BulkProjectRecordCreateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not tenant:
-            return Response(
-                {
-                    "success": False,
-                    "message": "Tenant context is required for bulk project creation.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         print('professional 2', professional)
         print('tenant 2', tenant)

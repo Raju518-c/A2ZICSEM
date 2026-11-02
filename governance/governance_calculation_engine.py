@@ -394,25 +394,22 @@ def build_summary(professional):
     return ". ".join(s for s in sentences if s) + ("." if sentences else "")
 
 
+EXPIRY_CONTROLLED_CREDENTIAL_TYPES = frozenset({
+    "CERTIFICATION", "PASSPORT", "MARINE_CDC", "MARINE_COC",
+    "MEMBERSHIP", "CLIENT_APPROVAL", "MEDICAL_FITNESS",
+})
+
+
 def compute_credential_status(credential, today=None):
-    """Based On: Certification expiry date vs. current date. Pure function —
-    only ever auto-transitions among ACTIVE/EXPIRING_SOON/EXPIRED. Never
-    touches SUSPENDED/REVOKED/PENDING_VERIFICATION/DRAFT/ARCHIVED: per the
-    sheet, 'an expired credential should not simply be overridden to
-    Active — corrected evidence must be supplied' via the human
-    override/evidence path instead. Returns None when nothing should
-    change."""
-    AUTO_STATES = {"ACTIVE", "EXPIRING_SOON", "EXPIRED"}
-    if credential.status not in AUTO_STATES or not credential.expiry_date:
+    """Expire only expiry-controlled credentials; never use course end_date."""
+    if credential.record_type not in EXPIRY_CONTROLLED_CREDENTIAL_TYPES:
         return None
-    today = today or timezone.now().date()
-    if credential.expiry_date < today:
-        new_status = "EXPIRED"
-    elif credential.expiry_date <= today + timedelta(days=30):
-        new_status = "EXPIRING_SOON"
-    else:
-        new_status = "ACTIVE"
-    return new_status if new_status != credential.status else None
+    if credential.status not in {"ACTIVE", "EXPIRING_SOON", "EXPIRED"}:
+        return None
+    today = today or timezone.localdate()
+    if credential.expiry_date and credential.expiry_date < today and credential.status != "EXPIRED":
+        return "EXPIRED"
+    return None
 
 
 # ---------------------------------------------------------------------

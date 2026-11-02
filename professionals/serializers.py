@@ -12,7 +12,6 @@ from .models import (
     ProfessionalReview,
 )
 
-
 class ProfessionalProfileSerializer(serializers.ModelSerializer):
     profile_photo_evidence = serializers.PrimaryKeyRelatedField(
         queryset=EvidenceDocument.objects.all(),
@@ -23,9 +22,13 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProfessionalProfile
         fields = "__all__"
-        read_only_fields = ["public_id", "created_at", "updated_at"]
-
-
+        read_only_fields = [
+            "public_id",
+            "created_at",
+            "updated_at",
+        ]
+        validators = []
+        
 class ProfessionalReviewSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProfessionalReview
@@ -89,14 +92,23 @@ class CredentialRecordSerializer(serializers.ModelSerializer):
 
 
 class CapabilityRecordSerializer(serializers.ModelSerializer):
+    tenant = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model = CapabilityRecord
         fields = "__all__"
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "tenant",
+            "created_at",
+            "updated_at",
+        ]
 
     def validate(self, attrs):
         def current(field, default=""):
-            return attrs.get(field, getattr(self.instance, field, default))
+            return attrs.get(
+                field,
+                getattr(self.instance, field, default)
+            )
 
         capability_type = current("capability_type", None)
         reference_value = current("reference_value", None)
@@ -106,14 +118,21 @@ class CapabilityRecordSerializer(serializers.ModelSerializer):
         writing_level = current("writing_level")
 
         if not reference_value and not custom_name:
-            raise serializers.ValidationError(
-                {"custom_name": "custom_name is required when reference_value is not set."}
-            )
+            raise serializers.ValidationError({
+                "custom_name": (
+                    "custom_name is required when reference_value is not set."
+                )
+            })
 
-        if capability_type == "LANGUAGE" and not (speaking_level and reading_level and writing_level):
-            raise serializers.ValidationError(
-                {"speaking_level": "speaking_level, reading_level and writing_level are all required when capability_type=LANGUAGE."}
-            )
+        if capability_type == "LANGUAGE" and not (
+            speaking_level and reading_level and writing_level
+        ):
+            raise serializers.ValidationError({
+                "speaking_level": (
+                    "speaking_level, reading_level and writing_level "
+                    "are all required when capability_type=LANGUAGE."
+                )
+            })
 
         return attrs
 
@@ -162,56 +181,73 @@ class CombinedCredentialRecordItemSerializer(serializers.ModelSerializer):
         read_only_fields = ("credential_record", "tenant")
 
 
+from django.db import transaction
+
 class CombinedCredentialRecordSerializer(serializers.ModelSerializer):
     items = CombinedCredentialRecordItemSerializer(
         many=True,
-        required=False
+        required=False,
     )
 
     class Meta:
         model = CredentialRecord
         fields = "__all__"
         read_only_fields = (
+            "tenant",
             "created_at",
-            "updated_at"
+            "updated_at",
         )
 
-    def create(self, validated_data):
-        print("validated_data =", validated_data)
+    def validate(self, attrs):
+        professional = attrs.get(
+            "professional",
+            getattr(self.instance, "professional", None),
+        )
 
+        if professional is None:
+            raise serializers.ValidationError({
+                "professional": "Professional is required."
+            })
+
+        # Tenant is derived from ProfessionalProfile.
+        # Qualion: None; Tenant surveyor: actual tenant.
+        attrs["tenant"] = professional.tenant_id
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
         items_data = validated_data.pop("items", [])
-        tenant = validated_data.pop("tenant")
+        tenant_id = validated_data.pop("tenant", None)
 
         credential = CredentialRecord.objects.create(
-            tenant=tenant,
-            **validated_data
+            tenant_id=tenant_id,
+            **validated_data,
         )
 
         for item_data in items_data:
+            item_data.pop("tenant", None)
+
             CredentialRecordItem.objects.create(
                 credential_record=credential,
-                tenant=tenant,
-                **item_data
+                tenant_id=tenant_id,
+                **item_data,
             )
 
         return credential
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
+        validated_data.pop("tenant", None)
 
-        # --------------------------------
-        # Update Parent Record
-        # --------------------------------
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
+        instance.tenant_id = instance.professional.tenant_id
         instance.save()
 
-        # --------------------------------
-        # Update Child Items
-        # --------------------------------
         if items_data is not None:
-
             existing_items = {
                 item.id: item
                 for item in instance.items.all()
@@ -220,37 +256,26 @@ class CombinedCredentialRecordSerializer(serializers.ModelSerializer):
             received_item_ids = []
 
             for item_data in items_data:
+                item_id = item_data.pop("id", None)
+                item_data.pop("tenant", None)
 
-                item_id = item_data.get("id")
-
-                # --------------------------
-                # Update Existing Item
-                # --------------------------
                 if item_id and item_id in existing_items:
-
                     item = existing_items[item_id]
 
                     for key, value in item_data.items():
-                        if key != "id":
-                            setattr(item, key, value)
+                        setattr(item, key, value)
 
+                    item.tenant_id = instance.tenant_id
                     item.save()
-
                     received_item_ids.append(item_id)
 
-                # --------------------------
-                # Create New Item
-                # --------------------------
                 else:
-
                     CredentialRecordItem.objects.create(
                         credential_record=instance,
-                        **item_data
+                        tenant_id=instance.tenant_id,
+                        **item_data,
                     )
 
-            # --------------------------------
-            # Delete Removed Items
-            # --------------------------------
             for item_id, obj in existing_items.items():
                 if item_id not in received_item_ids:
                     obj.delete()

@@ -50,6 +50,7 @@ ALLOWED_HOSTS = [
     ".qualion.com",
     "145.79.0.94:83",
     "145.79.0.94:81",
+    # "qld-comfort-funky-lime.trycloudflare.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -63,6 +64,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.qualion.com",
     "http://145.79.0.94:83",
     "http://145.79.0.94:81",
+    # "https://qld-comfort-funky-lime.trycloudflare.com",
 ]
 
 
@@ -101,6 +103,7 @@ LOCAL_APPS = [
     "resumes",
     "governance",
     "training",
+    "ecosystem",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -334,6 +337,21 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 
 CORS_ALLOW_CREDENTIALS = True
 
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",
+#     "http://localhost:5173",
+#     "http://127.0.0.1:3000",
+#     "http://127.0.0.1:5173",
+#     "http://145.79.0.94:83",
+#     "http://145.79.0.94:81",
+# ]
+
+# CORS_ALLOWED_ORIGIN_REGEXES = [
+#     r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+#     r"^https?://([a-z0-9-]+\.)?qualion\.com$",
+# ]
+
+# CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------

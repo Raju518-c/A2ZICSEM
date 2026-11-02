@@ -21,14 +21,14 @@ from django.utils.text import slugify
 
 def evidence_upload_path(instance, filename):
     """
-    media/tenant_name/email3+mobile3/evidence_type/filename
+    Relative to MEDIA_ROOT: tenant_name_or_qualion/email3+mobile3/evidence_type/filename
     """
 
     professional = instance.professional
     user = professional.user
     tenant = user.tenant
 
-    tenant_name = slugify(tenant.name)
+    tenant_name = (slugify(tenant.name) if tenant is not None else "qualion") or "tenant"
 
     email_part = (
         user.email.split("@")[0][:3].lower()

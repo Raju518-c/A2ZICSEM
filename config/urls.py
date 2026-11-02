@@ -48,6 +48,7 @@ urlpatterns = [
     path("",include("resumes.urls")),   
     path("",include("governance.urls")),
     path("",include("training.urls")),
+    path("",include("ecosystem.urls")),
 ]
 
 if settings.DEBUG:

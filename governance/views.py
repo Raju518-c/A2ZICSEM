@@ -3260,54 +3260,14 @@ def reference_json_value(reference):
 # ============================================================
 
 def get_highest_authority(project_scope_rows):
+    """Highest ranked ProjectScope.authority_action by ReferenceValue.sort_order.
+
+    The caller supplies project scopes for one professional and one scope.
+    No hard-coded ReferenceValue IDs or authority labels are used.
     """
-    Excel rule:
-
-        Highest Authority Reached
-
-        Based on:
-            Authority level recorded per project,
-            verification status.
-
-        How it works:
-            Highest VERIFIED authority achieved on the
-            standard authority ladder.
-
-    IMPORTANT:
-        ProjectRecord may be SELF_DECLARED, etc.,
-        but authority itself must be VERIFIED.
-
-    Therefore only ProjectScope records with:
-        verification_status == VERIFIED
-    are considered here.
-    """
-
-    highest_authority = None
-    highest_rank = 0
-
-    for project_scope in project_scope_rows:
-
-        # Sheet explicitly says VERIFIED authority.
-        # if project_scope.verification_status != "VERIFIED":
-        #     continue
-
-        authority = project_scope.authority_action
-
-        if not authority:
-            continue
-
-        authority_code = reference_value_code(authority)
-
-        if not authority_code:
-            continue
-
-        rank = AUTHORITY_RANK.get(authority_code, 0)
-
-        if rank > highest_rank:
-            highest_rank = rank
-            highest_authority = authority
-
-    return highest_authority
+    candidates = [row.authority_action for row in project_scope_rows
+                  if row.authority_action_id and row.authority_action]
+    return max(candidates, key=lambda value: (value.sort_order, value.pk)) if candidates else None
 
 
 # ============================================================
@@ -3776,63 +3736,27 @@ def generate_summary(
 # CREDENTIAL STATUS
 # ============================================================
 
-def calculate_credential_status(
-    credential,
-    today,
-):
+# Only types with a real validity/expiry lifecycle can expire automatically.
+# TRAINING and EDUCATION end_date denotes course completion, NOT expiry.
+EXPIRY_CONTROLLED_CREDENTIAL_TYPES = frozenset({
+    "CERTIFICATION", "PASSPORT", "MARINE_CDC", "MARINE_COC",
+    "MEMBERSHIP", "CLIENT_APPROVAL", "MEDICAL_FITNESS",
+})
+
+
+def calculate_credential_status(credential, today):
+    """Expire only expiry-controlled credentials with an explicit expiry_date.
+
+    Never override manually governed statuses or auto-reactivate expired records.
+    Missing expiry_date does not imply expiry. Other types are untouched.
     """
-    Current model supports:
-
-        DRAFT
-        ACTIVE
-        EXPIRED
-        REVOKED
-        ARCHIVED
-
-    Rules:
-
-    1. REVOKED stays REVOKED.
-    2. ARCHIVED stays ARCHIVED.
-    3. expiry_date before today -> EXPIRED.
-    4. end_date before today -> EXPIRED.
-    5. start_date in future -> DRAFT.
-    6. issue_date in future -> DRAFT.
-    7. Otherwise -> ACTIVE.
-
-    We DO NOT automatically overwrite REVOKED/ARCHIVED.
-    """
-
-    if credential.status in [
-        "REVOKED",
-        "ARCHIVED",
-    ]:
+    if credential.record_type not in EXPIRY_CONTROLLED_CREDENTIAL_TYPES:
+        return "ACTIVE"
+    if credential.status not in {"ACTIVE", "EXPIRING_SOON", "EXPIRED"}:
         return credential.status
-
-    if (
-        credential.expiry_date
-        and credential.expiry_date < today
-    ):
+    if credential.expiry_date and credential.expiry_date < today:
         return "EXPIRED"
-
-    if (
-        credential.end_date
-        and credential.end_date < today
-    ):
-        return "EXPIRED"
-
-    if (
-        credential.start_date
-        and credential.start_date > today
-    ):
-        return "DRAFT"
-
-    if (
-        credential.issue_date
-        and credential.issue_date > today
-    ):
-        return "DRAFT"
-
-    return "ACTIVE"
+    return credential.status
 
 
 # ============================================================
@@ -4106,6 +4030,7 @@ class ProfessionalCalculatedFieldsAPIView(APIView):
             grouped_project_scopes = [
                 row["project_scope"]
                 for row in rows
+                if row["project_scope"].verification_status in ("VERIFIED", "VALIDATED")
             ]
 
             highest_authority = (
@@ -4134,7 +4059,7 @@ class ProfessionalCalculatedFieldsAPIView(APIView):
                     professional=profile,
                     scope=scope,
                     defaults={
-                        "tenant": profile.tenant,
+                        "tenant_id": profile.tenant_id,
                         "calendar_experience_months":
                             calendar_experience_months,
                         "verified_field_days":
@@ -5020,8 +4945,8 @@ def evaluate_deployability_rule(rule, professional_scope, credentials):
         )
 
     if rule.min_ethics_independence_score is not None:
-        assessment = get_latest_assessment(professional_scope)
-        score = getattr(assessment, "ethics_independence_score", None) if assessment else None
+        # Single authoritative compliance score per ProfessionalScope.
+        score = professional_scope.compliance_score
         checks.append(score is not None and score >= rule.min_ethics_independence_score)
 
     if not checks:
@@ -5095,11 +5020,11 @@ def evaluate_classification_rule(rule, professional_scope, profile):
         checks.append(get_industry_experience_months(rule, professional_scope, profile) >= rule.min_industry_experience_months)
 
     latest_assessment = None
-    if rule.min_ethics_independence_score is not None or rule.require_latest_assessment_decision:
+    if rule.require_latest_assessment_decision:
         latest_assessment = get_latest_assessment(professional_scope)
 
     if rule.min_ethics_independence_score is not None:
-        actual_score = getattr(latest_assessment, "ethics_independence_score", None) if latest_assessment else None
+        actual_score = professional_scope.compliance_score
         checks.append(actual_score is not None and actual_score >= rule.min_ethics_independence_score)
 
     if rule.require_latest_assessment_decision:
@@ -5167,7 +5092,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
     No request body required.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # TEMPORARY: protect this endpoint before production
 
     @transaction.atomic
     def post(self, request, pk):
@@ -5178,19 +5103,31 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
         # 1. PROFESSIONAL PROFILE
         # ====================================================
         try:
-            profile = ProfessionalProfile.objects.select_for_update().select_related("user", "tenant").get(pk=pk)
+            profile = ProfessionalProfile.objects.select_for_update().select_related("user").get(pk=pk)
         except ProfessionalProfile.DoesNotExist:
             return Response({"success": False, "message": "ProfessionalProfile not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not request.user.is_superuser and str(request.user.tenant_id) != str(profile.tenant_id):
-            return Response({"success": False, "message": "Cross-tenant access denied."}, status=403)
+        # Stage 2 currently invokes this API internally without an authenticated
+        # DRF user. Anonymous requests are permitted while AllowAny is in use.
+        # IMPORTANT: replace with authenticated service-layer authorization
+        # before deploying to production; this endpoint writes profile fields.
+        if request.user.is_authenticated:
+            is_superuser = getattr(request.user, "is_superuser", False)
+            requester_tenant_id = getattr(request.user, "tenant_id", None)
+            is_owner = request.user.pk == profile.user_id
+            is_same_tenant = (
+                profile.tenant_id is not None
+                and requester_tenant_id == profile.tenant_id
+            )
+            if not (is_superuser or is_owner or is_same_tenant):
+                return Response({"success": False, "message": "Cross-tenant access denied."}, status=403)
 
         # ====================================================
         # 2. PROFESSIONAL SCOPES
         # ====================================================
         professional_scopes = list(
             ProfessionalScope.objects.select_for_update()
-            .filter(professional=profile, tenant=profile.tenant)
+            .filter(professional_id=profile.pk, tenant_id=profile.tenant_id)
             .select_related(
                 "scope",
                 "scope__industry",
@@ -5217,31 +5154,26 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
         # ====================================================
         # 3. PROFESSIONAL CREDENTIALS
         # ====================================================
-        credentials = list(CredentialRecord.objects.filter(professional=profile, tenant=profile.tenant))
+        credentials = list(CredentialRecord.objects.filter(professional_id=profile.pk, tenant_id=profile.tenant_id))
 
         # ====================================================
         # 4. ACTIVE RULE CONFIGURATIONS
         # ====================================================
-        # Rules are now SuperAdmin-owned and resolved via TenantRuleSelection.
-        # Never query CalculationRule by tenant or by its legacy M2M targets.
-        from governance.master_rule_models import resolve_tenant_rule_selection
-
+        # Platform-wide policy: exactly one active rule per field and scope.
+        # Rules target either industries (all their scopes) or explicit scopes.
         def selected_rule(scope_obj, field_code):
-            selection = resolve_tenant_rule_selection(profile.tenant, scope_obj.scope, field_code)
-            if selection is None:
-                raise DRFValidationError(f"No published tenant rule selection for {field_code} / scope {scope_obj.scope_id}.")
-            master = selection.master_rule_set
-            if master.status != "PUBLISHED" or master.calculation_field_code != field_code:
-                raise DRFValidationError("Invalid or unpublished selected master rule set.")
-            if master.effective_from and master.effective_from > timezone.localdate():
-                raise DRFValidationError("Master rule is not yet effective.")
-            if master.effective_to and master.effective_to < timezone.localdate():
-                raise DRFValidationError("Master rule has expired.")
-            rules = list(CalculationRule.objects.filter(master_rule_set=master, is_active=True,
-                        calculation_field_code=field_code).prefetch_related("qualion_level_conditions"))
+            rules = list(CalculationRule.objects.filter(
+                calculation_field_code=field_code, is_active=True,
+            ).filter(
+                models.Q(scope=scope_obj.scope) |
+                models.Q(industry=scope_obj.scope.industry)
+            ).distinct().prefetch_related("qualion_level_conditions"))
             if len(rules) != 1:
-                raise DRFValidationError(f"Expected exactly one active {field_code} rule in master set {master.pk}; found {len(rules)}.")
-            return selection, rules[0]
+                raise DRFValidationError(
+                    f"Expected exactly one active {field_code} rule for scope "
+                    f"{scope_obj.scope_id}; found {len(rules)}."
+                )
+            return rules[0]
 
         scope_results = []
 
@@ -5256,7 +5188,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # A. QUALION LEVEL: check configured levels by sort_order (highest -> lowest)
             # ------------------------------------------------
-            qualion_selection, qualion_rule = selected_rule(professional_scope, QUALION_LEVEL_FIELD)
+            qualion_rule = selected_rule(professional_scope, QUALION_LEVEL_FIELD)
             matched_qualion_condition = calculate_qualion_level(qualion_rule, professional_scope, credentials, evaluation_context=evaluation_context)
 
             if matched_qualion_condition:
@@ -5269,7 +5201,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # B. DEPLOYABILITY: pass => DEPLOYABLE, fail => NOT_DEPLOYABLE
             # ------------------------------------------------
-            deployability_selection, deployability_rule = selected_rule(professional_scope, DEPLOYABILITY_FIELD)
+            deployability_rule = selected_rule(professional_scope, DEPLOYABILITY_FIELD)
             deployability_passed = evaluate_deployability_rule(deployability_rule, professional_scope, credentials)
             professional_scope.is_deployable = (
                 ProfessionalScope.DeployabilityStatus.DEPLOYABLE
@@ -5280,7 +5212,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
             # ------------------------------------------------
             # C. CLASSIFICATION: pass => MENTOR, fail => CANDIDATE
             # ------------------------------------------------
-            classification_selection, classification_rule = selected_rule(professional_scope, CLASSIFICATION_FIELD)
+            classification_rule = selected_rule(professional_scope, CLASSIFICATION_FIELD)
 
             if classification_rule is None:
                 professional_scope.current_classification = ProfessionalScope.Classification.UNCLASSIFIED
@@ -5320,8 +5252,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                         "checked_order": "sort_order DESC",
                         "matched_condition_id": matched_qualion_condition.pk if matched_qualion_condition else None,
                         "calculation_rule_id": qualion_rule.pk,
-                        "tenant_rule_selection_id": qualion_selection.pk,
-                        "master_rule_set_id": qualion_selection.master_rule_set_id,
+                        "rule_source": "PLATFORM",
                         "calculation_rule": qualion_rule.label if qualion_rule else None,
                         "requires_four_eyes_approval": qualion_rule.requires_four_eyes_approval if qualion_rule else False,
                     },
@@ -5330,8 +5261,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                         "calculated": calculated_deployability,
                         "conditions_passed": deployability_passed,
                         "calculation_rule_id": deployability_rule.pk,
-                        "tenant_rule_selection_id": deployability_selection.pk,
-                        "master_rule_set_id": deployability_selection.master_rule_set_id,
+                        "rule_source": "PLATFORM",
                         "calculation_rule": deployability_rule.label if deployability_rule else None,
                         "requires_four_eyes_approval": deployability_rule.requires_four_eyes_approval if deployability_rule else False,
                     },
@@ -5340,8 +5270,7 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
                         "calculated": calculated_classification,
                         "mentor_conditions_passed": classification_passed,
                         "calculation_rule_id": classification_rule.pk,
-                        "tenant_rule_selection_id": classification_selection.pk,
-                        "master_rule_set_id": classification_selection.master_rule_set_id,
+                        "rule_source": "PLATFORM",
                         "calculation_rule": classification_rule.label if classification_rule else None,
                         "requires_four_eyes_approval": classification_rule.requires_four_eyes_approval if classification_rule else False,
                     },
@@ -5377,6 +5306,28 @@ class ProfessionalRuleCalculatedFieldsAPIView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+def validate_platform_rule_coverage(field_code, industry_ids, scope_ids, exclude_pk=None):
+    """Reject overlap across both industry and scope targets for a field."""
+    from catalog.models import ScopeCatalog
+    from rest_framework.exceptions import ValidationError
+    industry_ids = set(map(int, industry_ids or []))
+    scope_ids = set(map(int, scope_ids or []))
+    if bool(industry_ids) == bool(scope_ids):
+        raise ValidationError({"target": "Choose industries OR scopes, not both or neither."})
+    covered = set(scope_ids)
+    if industry_ids:
+        covered.update(ScopeCatalog.objects.filter(industry_id__in=industry_ids).values_list("pk", flat=True))
+    if not covered:
+        raise ValidationError({"target": "No scopes are covered by this rule."})
+    existing = CalculationRule.objects.filter(calculation_field_code=field_code, is_active=True).prefetch_related("industry", "scope")
+    if exclude_pk is not None:
+        existing = existing.exclude(pk=exclude_pk)
+    for rule in existing:
+        overlap = covered.intersection(rule.get_applicable_scopes().values_list("pk", flat=True))
+        if overlap:
+            raise ValidationError({"scope": f"Rule {rule.pk} already covers scope ID(s) {sorted(overlap)} for {field_code}."})
+
+
 class CalculationRuleCombinedListCreateAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -5421,6 +5372,12 @@ class CalculationRuleCombinedListCreateAPIView(APIView):
             raise_exception=True
         )
 
+        validate_platform_rule_coverage(
+            serializer.validated_data.get("calculation_field_code", getattr(serializer.instance, "calculation_field_code", None)),
+            payload.get("industry", list(serializer.instance.industry.values_list("pk", flat=True)) if serializer.instance else []),
+            payload.get("scope", list(serializer.instance.scope.values_list("pk", flat=True)) if serializer.instance else []),
+            exclude_pk=serializer.instance.pk if serializer.instance else None,
+        )
         rule = serializer.save()
 
         if payload.get("industry"):
@@ -5435,12 +5392,9 @@ class CalculationRuleCombinedListCreateAPIView(APIView):
 
         for item in new_conditions:
 
-            credential_types = item.pop(
-                []
-            )
 
             condition_serializer = QualionLevelConditionSerializer(data={
-                **item, "calculation_rule": rule.pk, "tenant": rule.tenant_id,
+                **item, "calculation_rule": rule.pk,
             })
             condition_serializer.is_valid(raise_exception=True)
             condition_serializer.save()
@@ -5537,6 +5491,12 @@ class CalculationRuleCombinedRetrieveUpdateAPIView(APIView):
             raise_exception=True
         )
 
+        validate_platform_rule_coverage(
+            serializer.validated_data.get("calculation_field_code", getattr(serializer.instance, "calculation_field_code", None)),
+            payload.get("industry", list(serializer.instance.industry.values_list("pk", flat=True)) if serializer.instance else []),
+            payload.get("scope", list(serializer.instance.scope.values_list("pk", flat=True)) if serializer.instance else []),
+            exclude_pk=serializer.instance.pk if serializer.instance else None,
+        )
         rule = serializer.save()
 
         if "industry" in payload:
@@ -5550,42 +5510,47 @@ class CalculationRuleCombinedRetrieveUpdateAPIView(APIView):
             )
 
         for item in update_conditions:
-
-            # Validate FK IDs and field types through DRF instead of assigning
-            # raw integer IDs to Django ForeignKey descriptors.
             condition_id = item.get("id")
+
             if not condition_id:
                 raise serializers.ValidationError({
                     "update_conditions": "Each updated condition requires an id."
                 })
+
             try:
                 condition = QualionLevelCondition.objects.get(
                     pk=condition_id,
                     calculation_rule=rule,
-                    tenant=rule.tenant,
                 )
             except QualionLevelCondition.DoesNotExist:
                 raise serializers.ValidationError({
-                    "update_conditions": f"Condition {condition_id} does not belong to this rule."
+                    "update_conditions": (
+                        f"Condition {condition_id} does not belong to this rule."
+                    )
                 })
 
-            condition_data = {k: value for k, value in item.items() if k != "id"}
+            condition_data = {
+                key: value
+                for key, value in item.items()
+                if key != "id"
+            }
+
             condition_serializer = QualionLevelConditionSerializer(
-                condition, data=condition_data, partial=True
+                condition,
+                data=condition_data,
+                partial=True,
             )
             condition_serializer.is_valid(raise_exception=True)
             condition_serializer.save()
 
+
         for item in new_conditions:
-
-            credential_types = item.pop(
-                []
+            condition_serializer = QualionLevelConditionSerializer(
+                data={
+                    **item,
+                    "calculation_rule": rule.pk,
+                }
             )
-
-            
-            condition_serializer = QualionLevelConditionSerializer(data={
-                **item, "calculation_rule": rule.pk, "tenant": rule.tenant_id,
-            })
             condition_serializer.is_valid(raise_exception=True)
             condition_serializer.save()
 

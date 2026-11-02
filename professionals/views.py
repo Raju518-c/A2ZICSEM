@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -160,9 +162,13 @@ def get_professional_scope_classification_summary(professional):
     Mixed Candidate/Mentor scopes are represented as BOTH in the review.
     """
     values = set(
+        # ProfessionalScope.objects.filter(
+        #     professional=professional,
+        #     tenant_id=professional.tenant_id,
+        # )
         ProfessionalScope.objects.filter(
-            professional=professional,
-            tenant=professional.tenant,
+            professional_id=professional.pk,
+            tenant_id=professional.tenant_id,
         )
         .exclude(current_classification__isnull=True)
         .exclude(current_classification="")
@@ -194,7 +200,7 @@ def apply_final_classification_to_scopes(professional, final_classification):
     scopes = list(
         ProfessionalScope.objects.select_for_update().filter(
             professional=professional,
-            tenant=professional.tenant,
+            tenant_id=professional.tenant_id,
         )
     )
 
@@ -342,7 +348,7 @@ class Stage2SubmitAPIView(APIView):
         if not professional.availability_status:
             missing.append("availability")
 
-        if not professional.consent_records.filter(consent_type__in=["PROFILE_ACCURACY", "CONFLICT_OF_INTEREST"], is_granted=True).count() >= 2:
+        if professional.consent_records.filter(consent_type__in=["PROFILE_ACCURACY", "CONFLICT_OF_INTEREST"], is_granted=True).values("consent_type").distinct().count() < 2:
             missing.append("declarations")
 
         return {"ok": not missing, "missing": missing}
@@ -350,9 +356,9 @@ class Stage2SubmitAPIView(APIView):
     @extend_schema(request=Stage2SubmitSerializer)
     def post(self, request, prof_id):
         try:
-            professional = ProfessionalProfile.objects.select_related("tenant", "user").get(pk=prof_id)
+            professional = ProfessionalProfile.objects.select_related("user").get(pk=prof_id)
         except ProfessionalProfile.DoesNotExist:
-            return Response({"success": False, "message": "Professional profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"success": False, "message": "Professional profile not found.", "received_prof_id": prof_id}, status=status.HTTP_404_NOT_FOUND)
 
         if professional.profile_status not in (ProfessionalProfile.ProfileStatus.STAGE1_COMPLETE, ProfessionalProfile.ProfileStatus.RETURNED):
             return Response({"success": False, "message": f"Cannot submit Stage 2 from status={professional.profile_status}."}, status=status.HTTP_400_BAD_REQUEST)
@@ -367,13 +373,15 @@ class Stage2SubmitAPIView(APIView):
         try:
             with transaction.atomic():
                 review = ProfessionalReview.objects.create(
-                    tenant=professional.tenant,
+                    tenant_id=professional.tenant_id,
                     professional=professional,
                     review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
                     profile_version=professional.profile_version,
                     submitted_by=professional.user,
                     submitted_at=now,
-                    previous_classification=get_professional_scope_classification_summary(professional),
+                    previous_classification=get_professional_scope_classification_summary(
+                        professional
+                    ),
                 )
 
                 professional.profile_status = ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED
@@ -391,6 +399,7 @@ class Stage2SubmitAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as exc:
+            logger.exception("Stage 2 submission failed for professional_id=%s", prof_id)
             return Response({
                 "success": False,
                 "message": "Stage 2 submission failed.",
@@ -404,6 +413,8 @@ class Stage2SubmitAPIView(APIView):
             "message": "Stage 2 submitted for review.",
             "data": {
                 "review_id": review.id,
+                "professional_id": professional.id,
+                "tenant_id": professional.tenant_id,
                 "profile_status": professional.profile_status,
                 "submitted_at": review.submitted_at,
                 "calculations": {
@@ -486,6 +497,13 @@ class ProfessionalReviewDecisionAPIView(APIView):
         reviewer_notes = serializer.validated_data.get("reviewer_notes", "")
         reviewed_by = self._resolve_reviewer(serializer.validated_data.get("reviewed_by"))
 
+        # A review decision must have an identifiable reviewer. Never trust
+        # an arbitrary tenant ID from the client; ownership is on the profile.
+        if reviewed_by is None:
+            return Response({"success": False, "message": "A valid reviewed_by UserTbl ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if reviewed_by.pk == review.professional.user_id:
+            return Response({"success": False, "message": "A professional cannot review their own profile."}, status=status.HTTP_403_FORBIDDEN)
+
         if review.decision != ProfessionalReview.Decision.PENDING:
             return Response(
                 {
@@ -511,6 +529,8 @@ class ProfessionalReviewDecisionAPIView(APIView):
         now = timezone.now()
         professional = review.professional
         user = professional.user
+        if professional.profile_status != ProfessionalProfile.ProfileStatus.STAGE2_SUBMITTED:
+            return Response({"success": False, "message": f"Profile is not awaiting Stage 2 review (status={professional.profile_status})."}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
             review.reviewed_by = reviewed_by
@@ -582,6 +602,8 @@ class ProfessionalReviewDecisionAPIView(APIView):
                 "message": f"Professional review {decision.lower()}.",
                 "data": {
                     "review_id": review.id,
+                    "professional_id": professional.id,
+                    "tenant_id": professional.tenant_id,
                     "decision": review.decision,
                     "profile_status": professional.profile_status,
                     "user_approval_status": user.approval_status,
@@ -622,9 +644,9 @@ class ProfessionalReviewResubmitAPIView(APIView):
 
     def post(self, request, prof_id):
         try:
-            professional = ProfessionalProfile.objects.select_related("tenant", "user").get(pk=prof_id)
+            professional = ProfessionalProfile.objects.select_related("user").get(pk=prof_id)
         except ProfessionalProfile.DoesNotExist:
-            return Response({"success": False, "message": "Professional profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"success": False, "message": "Professional profile not found.", "received_prof_id": prof_id}, status=status.HTTP_404_NOT_FOUND)
 
         if professional.profile_status != ProfessionalProfile.ProfileStatus.RETURNED:
             return Response({"success": False, "message": f"Cannot resubmit from status={professional.profile_status}."}, status=status.HTTP_400_BAD_REQUEST)
@@ -643,13 +665,15 @@ class ProfessionalReviewResubmitAPIView(APIView):
                 professional.save(update_fields=["profile_version", "profile_status", "updated_at"])
 
                 review = ProfessionalReview.objects.create(
-                    tenant=professional.tenant,
+                    tenant_id=professional.tenant_id,
                     professional=professional,
                     review_type=ProfessionalReview.ReviewType.PROFILE_APPROVAL,
                     profile_version=professional.profile_version,
                     submitted_by=professional.user,
                     submitted_at=now,
-                    previous_classification=get_professional_scope_classification_summary(professional),
+                    previous_classification=get_professional_scope_classification_summary(
+                        professional
+                    ),
                 )
 
                 calculation_result = run_stage2_calculations(professional.id)
@@ -664,6 +688,7 @@ class ProfessionalReviewResubmitAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as exc:
+            logger.exception("Stage 2 resubmission failed for professional_id=%s", prof_id)
             return Response({
                 "success": False,
                 "message": "Stage 2 resubmission failed.",
@@ -677,6 +702,8 @@ class ProfessionalReviewResubmitAPIView(APIView):
             "message": "Stage 2 resubmitted for review.",
             "data": {
                 "review_id": review.id,
+                "professional_id": professional.id,
+                "tenant_id": professional.tenant_id,
                 "profile_version": professional.profile_version,
                 "profile_status": professional.profile_status,
                 "calculations": {
@@ -850,19 +877,49 @@ class CapabilityRecordListCreateAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        for record in records:
-            record["professional"] = professional_id
-            record["tenant"] = professional.tenant_id
+        cleaned_records = []
 
-        serializer = CapabilityRecordSerializer(data=records, many=True)
+        for record in records:
+            item = record.copy()
+
+            # Professional comes from the parent payload.
+            item["professional"] = professional.id
+
+            # Tenant is always derived from ProfessionalProfile.
+            item.pop("tenant", None)
+
+            cleaned_records.append(item)
+
+        serializer = CapabilityRecordSerializer(
+            data=cleaned_records,
+            many=True,
+        )
+
         if serializer.is_valid():
             with transaction.atomic():
-                serializer.save()
+                created_records = serializer.save(
+                    tenant_id=professional.tenant_id
+                )
+
             return Response(
-                {"success": True, "message": "Capability records created successfully.", "data": serializer.data},
+                {
+                    "success": True,
+                    "message": "Capability records created successfully.",
+                    "data": CapabilityRecordSerializer(
+                        created_records,
+                        many=True
+                    ).data,
+                },
                 status=status.HTTP_201_CREATED,
             )
-        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "success": False,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CapabilityRecordRetrieveUpdateDeleteAPIView(APIView):
@@ -884,33 +941,44 @@ class CapabilityRecordRetrieveUpdateDeleteAPIView(APIView):
     @extend_schema(request=CapabilityRecordSerializer)
     def put(self, request, pk):
         capability = self.get_object(pk)
+
         if not capability:
-            return Response({"success": False, "message": "Capability record not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {
+                    "success": False,
+                    "message": "Capability record not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        data = request.data
-        professional_id = data.get("professional")
-        if professional_id:
-            try:
-                professional_id = int(professional_id)
-            except (TypeError, ValueError):
-                return Response(
-                    {"success": False, "message": "professional must be a valid integer."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            try:
-                professional = ProfessionalProfile.objects.get(id=professional_id)
-            except ProfessionalProfile.DoesNotExist:
-                return Response({"success": False, "message": "Professional not found."}, status=status.HTTP_404_NOT_FOUND)
-            if hasattr(data, "_mutable"):
-                data._mutable = True
-            data["tenant"] = professional.tenant_id
+        data = request.data.copy()
+        data.pop("tenant", None)
 
-        serializer = CapabilityRecordSerializer(capability, data=data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({"success": True, "message": "Capability record updated successfully.", "data": serializer.data}, status=status.HTTP_200_OK)
-        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        # Preserve the professional associated with this record.
+        # Reassignment should be a separate authorized operation.
+        data.pop("professional", None)
 
+        serializer = CapabilityRecordSerializer(
+            capability,
+            data=data,
+            partial=True,
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        serializer.save(
+            tenant_id=capability.professional.tenant_id
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Capability record updated successfully.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+        
     def delete(self, request, pk):
         capability = self.get_object(pk)
         if not capability:

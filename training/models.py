@@ -35,12 +35,13 @@ class TrainingProgram(Stamp):
     code = models.CharField(max_length=60)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    scope = models.ForeignKey(SCOPE, on_delete=models.PROTECT)
+    scope = models.ForeignKey(SCOPE, on_delete=models.PROTECT, null=True, blank=True)  # Legacy single-scope; use ContentCoverage for multiple targets
     target_qualion_level = models.ForeignKey(LEVEL, on_delete=models.PROTECT)
     version = models.PositiveIntegerField(default=1)
     estimated_duration_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=[(x,x) for x in ('DRAFT','IN_REVIEW','PUBLISHED','RETIRED')], default='DRAFT')
     created_by = models.ForeignKey(USER, on_delete=models.PROTECT, related_name='master_training_programs')
+    content_assignment = models.ForeignKey('ContentAssignment', on_delete=models.PROTECT, null=True, blank=True, related_name='created_programs')
     published_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         db_table = 'phase2_training_program'
@@ -63,7 +64,7 @@ class TrainingModule(Stamp):
         constraints = [models.UniqueConstraint(fields=['program','code'], name='p2_module_code'),models.UniqueConstraint(fields=['program','sequence'], name='p2_module_seq')]
 
 class QuestionBank(Stamp):
-    scope = models.ForeignKey(SCOPE, on_delete=models.PROTECT)
+    scope = models.ForeignKey(SCOPE, on_delete=models.PROTECT, null=True, blank=True)  # Legacy; use ContentCoverage
     qualion_level = models.ForeignKey(LEVEL, on_delete=models.PROTECT)
     question_text = models.TextField()
     difficulty = models.CharField(max_length=10, choices=[(x,x) for x in ('EASY','MEDIUM','HARD')])
@@ -72,6 +73,7 @@ class QuestionBank(Stamp):
     version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=[(x,x) for x in ('DRAFT','IN_REVIEW','PUBLISHED','RETIRED')], default='DRAFT')
     created_by = models.ForeignKey(USER, on_delete=models.PROTECT)
+    content_assignment = models.ForeignKey('ContentAssignment', on_delete=models.PROTECT, null=True, blank=True, related_name='created_questions')
     class Meta:
         db_table = 'phase2_question_bank'
 
@@ -91,7 +93,9 @@ class TrainingAssessment(Stamp):
     duration_minutes = models.PositiveIntegerField(default=30)
     passing_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=60, validators=[MinValueValidator(0),MaxValueValidator(100)])
     max_attempts = models.PositiveSmallIntegerField(default=3)
-    status = models.CharField(max_length=20, choices=[(x,x) for x in ('DRAFT','PUBLISHED','RETIRED')], default='DRAFT')
+    status = models.CharField(max_length=20, choices=[(x,x) for x in ('DRAFT','IN_REVIEW','PUBLISHED','RETIRED')], default='DRAFT')
+    created_by = models.ForeignKey(USER, on_delete=models.PROTECT, null=True, blank=True, related_name='master_assessments')
+    content_assignment = models.ForeignKey('ContentAssignment', on_delete=models.PROTECT, null=True, blank=True, related_name='created_assessments')
     class Meta:
         db_table = 'phase2_training_assessment'
         constraints = [models.UniqueConstraint(fields=['program','code'], name='p2_assessment_program_code')]
@@ -107,13 +111,20 @@ class AssessmentQuestionConfig(Stamp):
 
 class ContentAssignment(Stamp):
     """Assigned to platform-authorized content authors, e.g. SuperAdmin mentors."""
-    content_type = models.CharField(max_length=25, choices=[(x,x) for x in ('PROGRAM','QUESTION','ASSESSMENT','RULE_SET')])
-    object_id = models.PositiveBigIntegerField()
+    content_type = models.CharField(max_length=25, choices=[(x,x) for x in ('PROGRAM','QUESTION','ASSESSMENT','PROMOTION_RULE')])
+    object_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="Optional existing content target; blank for creation grants")
     assigned_to = models.ForeignKey(USER, on_delete=models.PROTECT, related_name='phase2_content_tasks')
     assigned_by = models.ForeignKey(USER, on_delete=models.PROTECT, related_name='phase2_content_assignments')
     due_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, default='ASSIGNED')
     notes = models.TextField(blank=True)
+    target_type = models.CharField(max_length=12, choices=[('INDUSTRY','Industry'),('SCOPE','Scope')], default='INDUSTRY')
+    industries = models.ManyToManyField('catalog.ReferenceValue', blank=True, related_name='phase2_author_assignments')
+    scopes = models.ManyToManyField(SCOPE, blank=True, related_name='phase2_author_assignments')
+    can_create = models.BooleanField(default=True)
+    can_edit = models.BooleanField(default=True)
+    can_submit = models.BooleanField(default=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         db_table = 'phase2_content_assignment'
 
@@ -123,6 +134,8 @@ class ContentApproval(Stamp):
     reviewed_by = models.ForeignKey(USER, on_delete=models.PROTECT)
     decision = models.CharField(max_length=20, choices=[(x,x) for x in ('APPROVED','REJECTED','RETURNED')])
     comments = models.TextField(blank=True)
+    submitted_by = models.ForeignKey(USER, on_delete=models.PROTECT, null=True, blank=True, related_name='phase2_content_submissions')
+    submitted_at = models.DateTimeField(default=timezone.now)
     class Meta:
         db_table = 'phase2_content_approval'
 
@@ -312,6 +325,7 @@ class ComplianceReview(TenantStamp):
     comments = models.TextField(blank=True)
     class Meta:
         db_table = 'phase2_compliance_review'
+        constraints = [models.UniqueConstraint(fields=['client_review'], condition=Q(status='VERIFIED'), name='p2_one_verified_compliance_review')]
 
 class ComplianceScoreHistory(TenantStamp):
     professional_scope = models.ForeignKey(PROF_SCOPE, on_delete=models.PROTECT)
@@ -429,3 +443,36 @@ class ProfessionalScopeScoreSnapshot(TenantStamp):
     last_verified_by = models.ForeignKey(USER, on_delete=models.PROTECT, null=True, blank=True)
     class Meta:
         db_table = 'phase2_professional_scope_score_snapshot'
+
+
+class ContentCoverage(Stamp):
+    """Industry-wide (all scopes) OR explicit multiple scopes for a master content item."""
+    content_type = models.CharField(max_length=25, choices=[(x,x) for x in ('PROGRAM','QUESTION','ASSESSMENT','PROMOTION_RULE')])
+    object_id = models.PositiveBigIntegerField()
+    target_type = models.CharField(max_length=12, choices=[('INDUSTRY','Industry'),('SCOPE','Scope')])
+    industries = models.ManyToManyField('catalog.ReferenceValue', blank=True, related_name='phase2_content_coverage')
+    scopes = models.ManyToManyField(SCOPE, blank=True, related_name='phase2_content_coverage')
+    class Meta:
+        db_table = 'phase2_content_coverage'
+        constraints = [models.UniqueConstraint(fields=['content_type','object_id'], name='p2_content_coverage_unique')]
+
+class PromotionRuleContent(Stamp):
+    """Publication wrapper for existing governance.CalculationRule; do not duplicate its conditions."""
+    calculation_rule = models.OneToOneField('governance.CalculationRule', on_delete=models.PROTECT, related_name='phase2_content')
+    created_by = models.ForeignKey(USER, on_delete=models.PROTECT, related_name='phase2_promotion_rules_created')
+    content_assignment = models.ForeignKey(ContentAssignment, on_delete=models.PROTECT, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=[(x,x) for x in ('DRAFT','IN_REVIEW','PUBLISHED','RETIRED')], default='DRAFT')
+    published_at = models.DateTimeField(null=True, blank=True)
+    class Meta:
+        db_table = 'phase2_promotion_rule_content'
+
+class TenantContentSelection(TenantStamp):
+    """Tenant opt-in for approved platform content, without changing platform masters."""
+    content_type = models.CharField(max_length=25, choices=[(x,x) for x in ('PROGRAM','QUESTION','ASSESSMENT','PROMOTION_RULE')])
+    object_id = models.PositiveBigIntegerField()
+    selected_by = models.ForeignKey(USER, on_delete=models.PROTECT)
+    is_active = models.BooleanField(default=True)
+    selected_at = models.DateTimeField(default=timezone.now)
+    class Meta:
+        db_table = 'phase2_tenant_content_selection'
+        constraints = [models.UniqueConstraint(fields=['tenant','content_type','object_id'], name='p2_tenant_content_once')]

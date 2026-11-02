@@ -636,7 +636,7 @@ class CalculationRuleSet(UUIDModel, TenantOwnedModel, TimeStampedModel):
 
     def __str__(self):
         scope_label = self.scope or "tenant-wide"
-        return f"{self.tenant} — {self.calculation_field_code} — {scope_label} v{self.version} ({self.status})"
+        return f"{self.calculation_field_code} — {scope_label} v{self.version} ({self.status})"
 
 
 
@@ -974,7 +974,7 @@ class CalculationRule(TimeStampedModel):
         return False
 
     def __str__(self):
-        return f"{self.tenant} - {self.calculation_field_code} - {self.label}"
+        return f"{self.calculation_field_code} - {self.label}"
 
 class QualionLevelCondition(TimeStampedModel):
 

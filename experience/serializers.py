@@ -46,11 +46,14 @@ class ScopeFormFieldSerializer(serializers.ModelSerializer):
 
 
 class EmploymentRecordSerializer(serializers.ModelSerializer):
+    tenant = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model = EmploymentRecord
         fields = "__all__"
         read_only_fields = (
             "id",
+            "tenant",
             "created_at",
             "updated_at",
         )
@@ -106,10 +109,8 @@ class ProjectRecordSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         tenant = self.context.get("tenant")
         professional = self.context.get("professional")
-        if not tenant or not professional:
-            raise serializers.ValidationError(
-                "A tenant and professional context is required to create a project record."
-            )
+        if not professional:
+            raise serializers.ValidationError("Professional context is required.")
 
         validated_data["tenant"] = tenant
         validated_data["professional"] = professional
@@ -143,6 +144,10 @@ class ScopeResponseInputSerializer(serializers.Serializer):
     
 class ProjectScopeInputSerializer(serializers.Serializer):
     scope = serializers.IntegerField(required=True)
+    authority_action = serializers.PrimaryKeyRelatedField(
+        queryset=ReferenceValue.objects.filter(option_set__option_type="AUTHORITY_STATUS", is_active=True),
+        required=False, allow_null=True,
+    )
 
     activity_summary = serializers.CharField(
         required=False,
@@ -294,8 +299,8 @@ class BulkProjectRecordSerializer(serializers.Serializer):
     def validate(self, attrs):
         tenant = self.context.get("tenant")
         professional = self.context.get("professional")
-        if not tenant:
-            raise serializers.ValidationError({"tenant": "Tenant context is required."})
+        if not professional:
+            raise serializers.ValidationError({"professional": "Professional context is required."})
         
         return attrs
 
@@ -412,6 +417,7 @@ class BulkProjectRecordSerializer(serializers.Serializer):
                         project=project,
 
                         scope_id=scope_payload["scope"],
+                        authority_action=scope_payload.get("authority_action"),
 
                         activity_summary=scope_payload.get(
                             "activity_summary"
@@ -543,6 +549,11 @@ class BulkProjectRecordSerializer(serializers.Serializer):
 
 
 class ProjectScopeSerializer(serializers.ModelSerializer):
+    def validate_authority_action(self, value):
+        if value is not None and (value.option_set.option_type != "AUTHORITY_STATUS" or not value.is_active):
+            raise serializers.ValidationError("Select an active AUTHORITY_STATUS reference value.")
+        return value
+
     class Meta:
         model = ProjectScope
         fields = "__all__"

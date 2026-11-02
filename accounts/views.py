@@ -135,6 +135,23 @@ def _extract_tenant_id_from_request(request):
             return None
     return value
 
+def _resolve_registration_tenant(value):
+    if value is None or str(value).strip().lower() in ("", "qualion"):
+        return None
+    value = str(value).strip()
+    if value.isdigit():
+        tenant = Tenant.objects.filter(pk=int(value)).first()
+        if tenant:
+            return tenant
+    try:
+        tenant = Tenant.objects.filter(public_id=value).first()
+        if tenant:
+            return tenant
+    except (ValueError, ValidationError):
+        pass
+    return Tenant.objects.filter(portal_slug=value).first()
+
+
 from core.serializers import *
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -145,27 +162,97 @@ class UserTblListCreateAPIView(APIView):
     """
     permission_classes = [AllowAny]
     
+    # def get(self, request):
+    #     try:
+    #         tenant_value = _extract_request_value(request, ("tenant_id", "tenant", "tenantId"))
+    #         request_type = _extract_request_value(request, ("type", "user_type"))
+    #         queryset = UserTbl.objects.all().order_by("email")
+
+    #         # Qualion: ?source=qualion or ?tenant_id=qualion; Tenant: ?tenant_id=123
+    #         source = str(request.query_params.get("source", "")).strip().lower()
+    #         if source == "qualion" or str(tenant_value).strip().lower() == "qualion":
+    #             queryset = queryset.filter(tenant__isnull=True)
+    #         elif tenant_value is not None:
+    #             tenant = _resolve_registration_tenant(tenant_value)
+    #             if tenant is None:
+    #                 return Response({"success": False, "message": "Tenant not found."}, status=404)
+    #             queryset = queryset.filter(tenant=tenant)
+    #         else:
+    #             # Preserve existing unfiltered GET behavior for callers without context.
+    #             pass
+
+    #         if isinstance(request_type, str):
+    #             request_type = request_type.strip().lower()
+    #             if request_type == "general":
+    #                 queryset = queryset.filter(role__isnull=True)
+    #             elif request_type == "tenant":
+    #                 if source == "qualion" or str(tenant_value).strip().lower() == "qualion":
+    #                     queryset = queryset.none()
+    #                 elif tenant_value is not None:
+    #                     queryset = queryset.filter(role__tenant=tenant).distinct()
+    #                 else:
+    #                     queryset = queryset.filter(role__isnull=False).distinct()
+
+    #         serializer = UserTblSerializer(queryset, many=True)
+    #         return Response({"success": True, "message": "Users fetched successfully.", "data": serializer.data}, status=200)
+    #     except Exception:
+    #         logger.exception("Failed to fetch users")
+    #         return Response({"success": False, "message": "Unable to fetch users."}, status=500)
+
     def get(self, request):
-        tenant_id = _extract_tenant_id_from_request(request)
-        request_type = _extract_request_value(request, ("type", "user_type"))
-        queryset = UserTbl.objects.all().order_by("email")
+        try:
+            tenant_value = _extract_request_value(request, ("tenant_id", "tenant", "tenantId"))
+            request_type = _extract_request_value(request, ("type", "user_type"))
+            queryset = UserTbl.objects.all().order_by("email")
 
-        if tenant_id is not None:
-            queryset = queryset.filter(tenant_id=tenant_id)
+            # Qualion: ?source=qualion or ?tenant_id=qualion; Tenant: ?tenant_id=123
+            source = str(request.query_params.get("source", "")).strip().lower()
+            if source == "qualion" or str(tenant_value).strip().lower() == "qualion":
+                queryset = queryset.filter(tenant__isnull=True)
+            elif tenant_value is not None:
+                tenant = _resolve_registration_tenant(tenant_value)
+                if tenant is None:
+                    return Response({"success": False, "message": "Tenant not found."}, status=404)
+                queryset = queryset.filter(tenant=tenant)
+            else:
+                # Preserve existing unfiltered GET behavior for callers without context.
+                pass
 
-        if tenant_id is not None and isinstance(request_type, str):
-            request_type = request_type.strip().lower()
-            if request_type == "general":
-                queryset = queryset.filter(role__isnull=True)
-            elif request_type == "tenant":
-                queryset = queryset.filter(role__tenant_id=tenant_id).distinct()
+            if isinstance(request_type, str):
+                request_type = request_type.strip().lower()
+                if request_type == "general":
+                    queryset = queryset.filter(role__isnull=True)
+                elif request_type == "tenant":
+                    if source == "qualion" or str(tenant_value).strip().lower() == "qualion":
+                        queryset = queryset.none()
+                    elif tenant_value is not None:
+                        queryset = queryset.filter(role__tenant=tenant).distinct()
+                    else:
+                        queryset = queryset.filter(role__isnull=False).distinct()
 
-        serializer = UserTblSerializer(queryset, many=True)
-        return Response(
-            {"success": True, "message": "Users fetched successfully.", "data": serializer.data},
-            status=status.HTTP_200_OK,
-        )
-    
+            # Only users whose most recent ProfessionalReview decision is APPROVED.
+            # Apply after source/type filtering, without changing the default API behavior.
+            profile_status = str(request.query_params.get("profile_status", "")).strip().upper()
+            if profile_status == "APPROVED":
+                from django.db.models import OuterRef, Subquery
+                latest_decision = (
+                    ProfessionalReview.objects
+                    .filter(professional__user_id=OuterRef("pk"))
+                    .order_by("-submitted_at", "-pk")
+                    .values("decision")[:1]
+                )
+                queryset = queryset.annotate(
+                    _latest_professional_review_decision=Subquery(latest_decision)
+                ).filter(_latest_professional_review_decision="APPROVED")
+            elif profile_status:
+                return Response({"success": False, "message": "Unsupported profile_status. Use APPROVED."}, status=400)
+
+            serializer = UserTblSerializer(queryset, many=True)
+            return Response({"success": True, "message": "Users fetched successfully.", "data": serializer.data}, status=200)
+        except Exception:
+            logger.exception("Failed to fetch users")
+            return Response({"success": False, "message": "Unable to fetch users."}, status=500)
+
     @extend_schema(request=InvitedUserRegistrationSerializer)
     def post(self, request):
 
@@ -1005,7 +1092,7 @@ class RegistrationApplicationResubmitAPIView(APIView):
         scope = helper._resolve_scope_catalog(payload.get("primary_scope")) or application.selected_scope
         country_code = (payload.get("country_of_residence") or "")[:2] or application.selected_operating_country
 
-        if not TenantOperation.objects.filter(
+        if tenant is not None and not TenantOperation.objects.filter(
             tenant=tenant,
             industry=industry,
             country_code=country_code,
@@ -1553,11 +1640,12 @@ class RegisterAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        tenant = self._resolve_tenant(payload.get("tenant"))
-        if not tenant:
-            return Response({"success": False, "message": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
+        tenant_value = payload.get("tenant")
+        tenant = self._resolve_tenant(tenant_value)
+        if tenant_value not in (None, "", "qualion", "QUALION") and tenant is None:
+            return Response({"success": False, "message": "Tenant not found."}, status=400)
 
-        if not tenant.registration_enabled:
+        if tenant is not None and not tenant.registration_enabled:
             return Response(
                 {"success": False, "message": "Registration is currently disabled for this tenant."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1569,6 +1657,8 @@ class RegisterAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        print('tenant', tenant)
+        print('email', email)
         try:
             with transaction.atomic():
                 user = UserTbl.objects.create(
@@ -1602,7 +1692,7 @@ class RegisterAPIView(APIView):
                     raise ValueError("Primary industry and primary scope are required.")
 
                 country_code = (payload.get("country_of_residence") or "")[:2]
-                if not TenantOperation.objects.filter(
+                if tenant is not None and not TenantOperation.objects.filter(
                     tenant=tenant,
                     industry=industry,
                     country_code=country_code,
@@ -1678,9 +1768,9 @@ class RegisterAPIView(APIView):
                 return Response(
                     {
                         "success": True,
-                        "message": "Registration submitted successfully. Your account is pending Tenant Admin approval.",
+                        "message": "Registration submitted successfully. Your account is pending review.",
                         "data": {
-                            "tenant_id": str(tenant.public_id),
+                            "tenant_id": str(tenant.public_id) if tenant else None,
                             "user_id": str(user.public_id),
                             "application_id": str(application.public_id),
                             "profile_id": str(profile.public_id),
@@ -1908,7 +1998,102 @@ class RegistrationUpdateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-@method_decorator(csrf_exempt, name='dispatch')
+# @method_decorator(csrf_exempt, name='dispatch')
+# class LoginAPIView(APIView):
+#     permission_classes = [AllowAny]
+#     serializer_class = LoginSerializer
+
+#     @extend_schema(request=LoginSerializer)
+#     def post(self, request, *args, **kwargs):
+#         from competency.models import ProfessionalScope
+#         from rest_framework import serializers as drf_serializers
+
+#         serializer = self.serializer_class(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+#         user = serializer.validated_data["user"]
+#         # Qualion surveyors have tenant=None and no assigned account roles.
+#         role_names = [role.name for role in user.role.all()]
+#         is_qualion = user.tenant_id is None
+#         is_super_admin = any(
+#             name.strip().lower().replace(" ", "") == "superadmin"
+#             for name in role_names
+#         ) or bool(getattr(user, "is_superuser", False))
+#         login_type = (
+#             "SUPER_ADMIN" if is_qualion and is_super_admin else
+#             "QUALION_SURVEYOR" if is_qualion else
+#             "TENANT"
+#         )
+
+#         user.last_login = timezone.now()
+#         user.save(update_fields=["last_login", "updated_at"])
+
+#         request.session.flush()
+#         request.session["user_id"] = user.id
+#         request.session["tenant_id"] = str(user.tenant.id) if user.tenant else None
+#         request.session["is_authenticated"] = True
+#         request.session.save()
+
+#         tenant_payload = None
+#         if user.tenant:
+#             tenant_payload = {
+#                 "id": str(user.tenant.public_id),
+#                 "name": user.tenant.name,
+#                 "portal_slug": user.tenant.portal_slug,
+#                 "status": user.tenant.status,
+#             }
+
+#         professional = ProfessionalProfile.objects.filter(user=user).first()
+#         scopes = list(
+#             ProfessionalScope.objects.filter(professional=professional)
+#             .select_related("scope", "current_qualion_level", "current_authority_status")
+#             .order_by("id")
+#         ) if professional else []
+
+#         classifications = {s.current_classification for s in scopes}
+#         is_candidate = "CANDIDATE" in classifications
+#         is_mentor = "MENTOR" in classifications
+#         classification = (
+#             "BOTH" if is_candidate and is_mentor else
+#             "CANDIDATE" if is_candidate else
+#             "MENTOR" if is_mentor else "UNCLASSIFIED"
+#         )
+
+#         class ProfessionalScopeLoginSerializer(drf_serializers.ModelSerializer):
+#             class Meta:
+#                 model = ProfessionalScope
+#                 fields = "__all__"
+
+#         account_payload = UserTblSerializer(user).data
+#         account_payload["is_candidate"] = is_candidate
+#         account_payload["is_mentor"] = is_mentor
+
+#         profile_payload = ProfessionalProfileSerializer(professional).data if professional else None
+#         scope_payload = ProfessionalScopeLoginSerializer(scopes, many=True).data
+
+#         return Response({
+#             "status": "success",
+#             "tenant": tenant_payload,
+#             "role": role_names,
+#             "login_type": login_type,
+#             "is_qualion": is_qualion,
+#             "user_id": user.id,
+#             "professional_id": professional.id if professional else None,
+#             "classification": classification,
+#             "is_candidate": is_candidate,
+#             "is_mentor": is_mentor,
+#             "accounts": account_payload,
+#             "professional_profile": profile_payload,
+#             "professional_scopes": scope_payload,
+#             "user": {
+#                 "id": user.id,
+#                 "public_id": str(user.public_id),
+#                 "first_name": professional.first_name if professional else "",
+#                 "last_name": professional.last_name if professional else "",
+#             },
+#         }, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
@@ -1920,18 +2105,23 @@ class LoginAPIView(APIView):
 
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
+
         user = serializer.validated_data["user"]
+        login_type = serializer.validated_data["login_type"]
 
         user.last_login = timezone.now()
         user.save(update_fields=["last_login", "updated_at"])
 
         request.session.flush()
         request.session["user_id"] = user.id
-        request.session["tenant_id"] = str(user.tenant.id) if user.tenant else None
+        request.session["tenant_id"] = (
+            str(user.tenant.id) if user.tenant else None
+        )
         request.session["is_authenticated"] = True
         request.session.save()
 
         tenant_payload = None
+
         if user.tenant:
             tenant_payload = {
                 "id": str(user.tenant.public_id),
@@ -1940,23 +2130,43 @@ class LoginAPIView(APIView):
                 "status": user.tenant.status,
             }
 
-        professional = ProfessionalProfile.objects.filter(user=user).first()
-        scopes = list(
-            ProfessionalScope.objects.filter(professional=professional)
-            .select_related("scope", "current_qualion_level", "current_authority_status")
-            .order_by("id")
-        ) if professional else []
-
-        classifications = {s.current_classification for s in scopes}
-        is_candidate = "CANDIDATE" in classifications
-        is_mentor = "MENTOR" in classifications
-        classification = (
-            "BOTH" if is_candidate and is_mentor else
-            "CANDIDATE" if is_candidate else
-            "MENTOR" if is_mentor else "UNCLASSIFIED"
+        professional = (
+            ProfessionalProfile.objects
+            .filter(user=user)
+            .first()
         )
 
-        class ProfessionalScopeLoginSerializer(drf_serializers.ModelSerializer):
+        scopes = (
+            list(
+                ProfessionalScope.objects
+                .filter(professional=professional)
+                .select_related(
+                    "scope",
+                    "current_qualion_level",
+                    "current_authority_status"
+                )
+                .order_by("id")
+            )
+            if professional else []
+        )
+
+        classifications = {
+            s.current_classification for s in scopes
+        }
+
+        is_candidate = "CANDIDATE" in classifications
+        is_mentor = "MENTOR" in classifications
+
+        classification = (
+            "BOTH" if is_candidate and is_mentor
+            else "CANDIDATE" if is_candidate
+            else "MENTOR" if is_mentor
+            else "UNCLASSIFIED"
+        )
+
+        class ProfessionalScopeLoginSerializer(
+            drf_serializers.ModelSerializer
+        ):
             class Meta:
                 model = ProfessionalScope
                 fields = "__all__"
@@ -1965,15 +2175,37 @@ class LoginAPIView(APIView):
         account_payload["is_candidate"] = is_candidate
         account_payload["is_mentor"] = is_mentor
 
-        profile_payload = ProfessionalProfileSerializer(professional).data if professional else None
-        scope_payload = ProfessionalScopeLoginSerializer(scopes, many=True).data
+        profile_payload = (
+            ProfessionalProfileSerializer(professional).data
+            if professional else None
+        )
+
+        scope_payload = ProfessionalScopeLoginSerializer(
+            scopes, many=True
+        ).data
+
+        role_names = list(
+            user.role.values_list("name", flat=True)
+        )
+
+        is_superadmin = (
+            login_type == "qualion"
+            and user.role.filter(
+                roles_for__iexact="super admin"
+            ).exists()
+        )
 
         return Response({
             "status": "success",
+            "login_type": login_type,
+            "is_qualion": login_type == "qualion",
+            "is_superadmin": is_superadmin,
             "tenant": tenant_payload,
-            "role": [role.name for role in user.role.all()],
+            "role": role_names,
             "user_id": user.id,
-            "professional_id": professional.id if professional else None,
+            "professional_id": (
+                professional.id if professional else None
+            ),
             "classification": classification,
             "is_candidate": is_candidate,
             "is_mentor": is_mentor,
@@ -1983,10 +2215,15 @@ class LoginAPIView(APIView):
             "user": {
                 "id": user.id,
                 "public_id": str(user.public_id),
-                "first_name": professional.first_name if professional else "",
-                "last_name": professional.last_name if professional else "",
+                "first_name": (
+                    professional.first_name if professional else ""
+                ),
+                "last_name": (
+                    professional.last_name if professional else ""
+                ),
             },
         }, status=status.HTTP_200_OK)
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class LogoutAPIView(APIView):
@@ -2005,56 +2242,26 @@ class LogoutAPIView(APIView):
 
 
 class CheckUserExistsAPIView(APIView):
-    """Return whether a tenant+email combination already exists."""
-
+    """Check email within the specified tenant, or Qualion when tenant is omitted."""
     permission_classes = [AllowAny]
 
     @extend_schema(request=CheckUserExistsRequestSerializer)
     def post(self, request, *args, **kwargs):
-        serializer = CheckUserExistsRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"success": False, "errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        validated_data = serializer.validated_data
-        tenant_value = validated_data.get("tenant") or validated_data.get("tenant_id")
-        email = (validated_data.get("email") or "").strip().lower()
-
-        if not tenant_value or not email:
-            return Response(
-                {"success": False, "message": "tenant and email are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        tenant = None
-        if tenant_value:
-            tenant_value = str(tenant_value).strip()
-            if tenant_value.isdigit():
-                tenant = Tenant.objects.filter(id=int(tenant_value)).first()
-            else:
-                tenant = (
-                    Tenant.objects.filter(public_id=tenant_value).first()
-                    or Tenant.objects.filter(portal_slug=tenant_value).first()
-                )
-
-        if tenant is None:
-            return Response(
-                {"success": False, "message": "Tenant not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        exists = UserTbl.objects.filter(tenant=tenant, email__iexact=email).exists()
-        return Response(
-            {
-                "success": True,
-                "status": "exist" if exists else "new",
-                "tenant": str(tenant.public_id),
-                "email": email,
-            },
-            status=status.HTTP_200_OK,
-        )
+        try:
+            serializer = CheckUserExistsRequestSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response({"success": False, "errors": serializer.errors}, status=400)
+            data = serializer.validated_data
+            email = data["email"].strip().lower()
+            tenant_value = data.get("tenant_id") or request.data.get("tenant")
+            tenant = _resolve_registration_tenant(tenant_value)
+            if tenant_value not in (None, "", "qualion", "QUALION") and tenant is None:
+                return Response({"success": False, "message": "Tenant not found."}, status=404)
+            exists = UserTbl.objects.filter(tenant=tenant, email__iexact=email).exists()
+            return Response({"success": True, "exists": exists, "status": "exist" if exists else "new", "tenant": str(tenant.public_id) if tenant else None, "email": email}, status=200)
+        except Exception:
+            logger.exception("check-user failed")
+            return Response({"success": False, "message": "Unable to check user."}, status=500)
 
 
 class OTPRequestAPIView(APIView):
